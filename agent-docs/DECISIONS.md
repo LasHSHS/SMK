@@ -140,15 +140,15 @@ processing** creates/activates the folder. Button label shortened from
 **Why**: Create was a redundant step that also cleared the name field;
 Start already created the folder.
 
-### 2026-08-01 - Microsoft Store as trusted Windows path
+### 2026-08-01 - GitHub only; no Store / no paid signing
 
-**What**: Prefer Microsoft Store (MSIX) for the main Windows install users
-should use. Keep GitHub Releases for portable ZIP / power users. Skip paid
-Authenticode for now unless we later want a signed off-Store installer.
+**What**: Official Windows builds ship from **GitHub Releases** only. No
+Microsoft Store listing, no Authenticode purchase, no ID/selfie developer
+onboarding. SmartScreen warning is documented; SHA-256 is published.
 
-**Why**: Individual Store registration is free with ID verification; Store
-trust avoids buying a code signing cert. Packaging work is MSIX + Partner
-Center, not a free one-click from the current PyInstaller folder alone.
+**Why**: Maintainer won’t pay for a cert or submit biometric/ID verification.
+Store also conflicts with the offline/privacy positioning (Microsoft account
+in the middle). Unsigned GitHub + clear “Run anyway” copy is the accepted tradeoff.
 
 ### 2026-08-01 - Layout resize: one owner, skip no-ops
 

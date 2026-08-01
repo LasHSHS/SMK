@@ -45,9 +45,7 @@ Use this list before publishing to GitHub, creating a release, or distributing t
 - [ ] Test Desktop `SMKTester.bat` (dev) and packaged `SMK.exe` on a non-dev PC
 - [ ] ffmpeg bundled in official build (`tools/ffmpeg/` or PyInstaller bundle)
 - [ ] Version number consistent: `smd/version.py`, About dialog, release tag
-- [ ] Mention unsigned / SmartScreen on GitHub downloads until Store (or Authenticode) is live
-- [ ] Microsoft Store: Partner Center account, reserve name, MSIX, privacy policy, screenshots (see DISTRIBUTION_GUIDE)
-- [ ] Optional later: Authenticode for off-Store GitHub installer
+- [ ] Mention unsigned / SmartScreen in release notes (GitHub-only distribution; no Store / no paid signing)
 
 ---
 
