@@ -45,7 +45,8 @@ Use this list before publishing to GitHub, creating a release, or distributing t
 - [ ] Test Desktop `SMKTester.bat` (dev) and packaged `SMK.exe` on a non-dev PC
 - [ ] ffmpeg bundled in official build (`tools/ffmpeg/` or PyInstaller bundle)
 - [ ] Version number consistent: `smd/version.py`, About dialog, release tag
-- [ ] Optional: code-sign `.exe` (SmartScreen trust)
+- [ ] Mention unsigned / SmartScreen in release notes until Authenticode is set up
+- [ ] Optional: code-sign `SMK.exe` + installer, then publish a new release (see DISTRIBUTION_GUIDE)
 
 ---
 

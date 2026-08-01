@@ -45,6 +45,14 @@ This script:
 - **Link-only exports (legacy JSON with URLs):** not supported - request a new export with media in the ZIP
 - **My Eyes Only** not included in Memories export
 
-## Code signing (optional)
+## Code signing (Authenticode)
 
-Unsigned builds may trigger SmartScreen. Publish hashes; add Authenticode signing when budget allows.
+Unsigned builds trigger SmartScreen (“unknown publisher”). Always publish SHA-256.
+
+When you have a code signing certificate (OV or EV from a CA):
+
+1. Build as usual (`build_smk.ps1`), then build the Inno installer.
+2. Sign `dist\smd\SMK.exe` and `installer_output\Snapchat-Memories-Keeper-Setup.exe` with `signtool` (or your CA’s tool), timestamped.
+3. Ship a **new** GitHub release (or replace assets) with the signed files + new hashes. Old downloads stay unsigned.
+
+Until then: document SmartScreen in README / release notes; users use More info → Run anyway.

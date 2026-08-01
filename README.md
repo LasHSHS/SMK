@@ -42,13 +42,15 @@ Please open an issue first for large ports (packaging/signing approach). Smaller
 
 **Official release — no extra software needed**
 
-1. Download and run the SMK installer (or unzip the portable folder).
+1. Download the installer or portable ZIP from [Releases](https://github.com/LasHSHS/SMK/releases).
 2. Open **Snapchat Memories Keeper** (`SMK.exe`).
-3. Request your Snapchat data export (Memories + JSON).
+3. Request your Snapchat data export (Memories + JSON). Steps are also in the app Guide / Help.
 4. Select the export ZIP (or folder with all ZIP parts).
 5. Click Start — processing runs locally on your PC.
 
 No Python, pip, ffmpeg, or other tools required in the official Windows build.
+
+**Windows SmartScreen:** current releases are **not code signed**. Windows may show “Windows protected your PC” / unknown publisher. That is expected. Use **More info → Run anyway** if you trust the download from this GitHub repo. Check the SHA-256 on the release page. Authenticode signing is planned when a certificate is available.
 
 ## Build & Release
 
@@ -122,7 +124,8 @@ classDiagram
 ## Security & Trust Checklist (Release)
 
 - Publish SHA-256 checksums for each release binary
+- Say clearly if the build is unsigned (SmartScreen warning)
 - Add clear "no telemetry" statement if you keep that policy
 - Add license + trademark notice (name/logo usage policy)
-- Consider code signing when budget allows (improves Windows SmartScreen trust)
+- Code sign when a certificate is available (new release with signed files)
 

@@ -99,6 +99,9 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+_version_file = Path('file_version_info.txt')
+version_arg = str(_version_file) if _version_file.is_file() else None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -116,6 +119,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_arg,
+    version=version_arg,
 )
 coll = COLLECT(
     exe,
