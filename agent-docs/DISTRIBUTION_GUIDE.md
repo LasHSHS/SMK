@@ -45,14 +45,34 @@ This script:
 - **Link-only exports (legacy JSON with URLs):** not supported - request a new export with media in the ZIP
 - **My Eyes Only** not included in Memories export
 
-## Code signing (Authenticode)
+## Preferred trust path: Microsoft Store
 
-Unsigned builds trigger SmartScreen (“unknown publisher”). Always publish SHA-256.
+**Decision (2026-08):** ship the trusted Windows install via the **Microsoft Store**
+(individual developer account is free with ID verification). GitHub Releases stay
+available for portable ZIP / advanced users; Store is what we point most people at
+once the listing is live.
 
-When you have a code signing certificate (OV or EV from a CA):
+### You (Las) — account & listing
 
-1. Build as usual (`build_smk.ps1`), then build the Inno installer.
-2. Sign `dist\smd\SMK.exe` and `installer_output\Snapchat-Memories-Keeper-Setup.exe` with `signtool` (or your CA’s tool), timestamped.
-3. Ship a **new** GitHub release (or replace assets) with the signed files + new hashes. Old downloads stay unsigned.
+1. Open a free Individual account at https://storedeveloper.microsoft.com  
+   (use your real government ID; other Partner Center entry points may still show the old paid flow).
+2. In Partner Center, reserve the app name (e.g. **Snapchat Memories Keeper**).
+3. Prepare Store assets: icon, screenshots, short/long description, privacy policy URL
+   (can be a simple page on las-hs.com or a `PRIVACY.md` in the repo), age rating questionnaire.
+4. Submit the MSIX package for certification; fix any policy feedback.
 
-Until then: document SmartScreen in README / release notes; users use More info → Run anyway.
+### Repo — packaging (next engineering work)
+
+1. Keep building the all-in-one folder with `build_smk.ps1` (`dist/smd/SMK.exe` + ffmpeg + WebEngine).
+2. Wrap that folder as **MSIX** (Desktop Bridge / `makeappx` or Visual Studio Packaging Project).
+3. Declare needed capabilities (filesystem access for user-chosen export ZIPs / output folders).
+4. Test install from a sideloaded MSIX, then upload to Partner Center.
+
+Until the Store listing is public: GitHub downloads remain unsigned → SmartScreen note in README.
+
+## Code signing (Authenticode) — optional later
+
+Not required for Store distribution (Store uses its own trust model).  
+Still useful if we keep a signed GitHub installer for people who refuse the Store.
+
+When you have a CA certificate: sign `SMK.exe` + Inno setup, then publish a new GitHub release with new hashes.

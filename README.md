@@ -50,7 +50,9 @@ Please open an issue first for large ports (packaging/signing approach). Smaller
 
 No Python, pip, ffmpeg, or other tools required in the official Windows build.
 
-**Windows SmartScreen:** Windows may warn that the app is unsigned. That is normal for now. Use **More info → Run anyway** if you got it from the [GitHub release](https://github.com/LasHSHS/SMK/releases). Check the SHA-256 on the release page. Authenticode signing is planned when a certificate is available.
+**Windows SmartScreen (GitHub downloads):** Windows may warn that the app is unsigned. That is normal for now. Use **More info → Run anyway** if you got it from the [GitHub release](https://github.com/LasHSHS/SMK/releases). Check the SHA-256 on the release page.
+
+**Microsoft Store:** we plan to publish SMK on the Store (free individual developer account + MSIX). That is the trusted install path once the listing is live; GitHub stays for portable builds. See `agent-docs/DISTRIBUTION_GUIDE.md`.
 
 ## Build & Release
 
