@@ -50,7 +50,7 @@ Please open an issue first for large ports (packaging/signing approach). Smaller
 
 No Python, pip, ffmpeg, or other tools required in the official Windows build.
 
-**Windows SmartScreen:** current releases are **not code signed**. Windows may show “Windows protected your PC” / unknown publisher. That is expected. Use **More info → Run anyway** if you trust the download from this GitHub repo. Check the SHA-256 on the release page. Authenticode signing is planned when a certificate is available.
+**Windows SmartScreen:** Windows may warn that the app is unsigned. That is normal for now. Use **More info → Run anyway** if you got it from the [GitHub release](https://github.com/LasHSHS/SMK/releases). Check the SHA-256 on the release page. Authenticode signing is planned when a certificate is available.
 
 ## Build & Release
 
