@@ -144,8 +144,12 @@ def build_about_html(
         "into a normal photo and video library on your PC, with capture dates, GPS, and filters "
         "preserved where Snapchat included them.</p>",
         f"<p>Created by <a href='{AUTHOR_URL}'><b>Las HS</b></a>. "
-        f"Source and releases on <a href='{AUTHOR_URL}'>GitHub</a>. "
+        "Source and releases: "
+        "<a href='https://github.com/LasHSHS/SMK'><b>github.com/LasHSHS/SMK</b></a>. "
         "<b>Not affiliated with Snap Inc.</b></p>",
+        "<p><b>Contributors welcome</b> — especially help making SMK work on "
+        "<b>macOS</b> and <b>Linux</b>, plus bug fixes and performance. "
+        "Open an issue or PR on the GitHub repo.</p>",
         f"<p style='{_MUTED}'>For step-by-step instructions and troubleshooting, see the "
         "<b>Guide</b> and <b>Help</b> tabs.</p>",
         "</section>",

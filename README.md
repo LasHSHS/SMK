@@ -26,8 +26,17 @@ Process Snapchat Memories exports locally on your PC: extract bundled media, mer
 ## Platform Support
 
 - Official target for v1: **Windows 10/11 (64-bit)** — this is the only platform built, tested, and supported by the maintainer.
-- The Python/PyQt5 source is cross-platform in principle, but there is no macOS, Linux, Android, or iOS build, and none is currently planned by the maintainer (no hardware to build or test on).
-- **Contributions welcome:** if you'd like to port SMK to macOS, Linux, Android, or iOS, PRs are very welcome. Please open an issue first to discuss packaging/signing approach for that platform before submitting a large PR.
+- The Python/PyQt5 source is cross-platform in principle, but there is no macOS or Linux build yet (and none is planned by the maintainer alone — no hardware to build or test on).
+
+## Contributing
+
+**Contributors are very welcome.** This project is open to help with:
+
+- **macOS and Linux** ports (packaging, installers, testing)
+- Bug fixes, performance, and code quality
+- Docs and UX polish
+
+Please open an issue first for large ports (packaging/signing approach). Smaller fixes and improvements can go straight to a PR. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Quick Start (User)
 
