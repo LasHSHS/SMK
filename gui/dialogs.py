@@ -1,4 +1,4 @@
-"""Modal dialogs for the SMD desktop GUI."""
+"""Modal dialogs for the SMK desktop GUI."""
 from __future__ import annotations
 
 import json
@@ -94,6 +94,7 @@ class DuplicateCompareDialog(QDialog):
         close_btn.setObjectName('toolbarBtn')
         close_btn.clicked.connect(self.accept)
         btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.addStretch(1)
         btn_row.addWidget(close_btn)
         root.addLayout(btn_row)
@@ -176,6 +177,7 @@ class SessionSummaryDialog(QDialog):
         lay.addWidget(browser, 1)
 
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         open_btn = QPushButton('Open finished folder')
         open_btn.setObjectName('accentBtn')
         open_btn.clicked.connect(
@@ -207,6 +209,7 @@ class DuplicateReviewDialog(QDialog):
         self.account_name = account_name
         self.report = report
         self._dark = dark
+        self._is_visual = getattr(report, 'kind', 'byte') == 'visual'
         self._group_ui: list[tuple[str, list, QButtonGroup]] = []
         self._preview_targets: dict[str, tuple[QPushButton, QLabel]] = {}
 
@@ -219,12 +222,22 @@ class DuplicateReviewDialog(QDialog):
         root.setSpacing(12)
         root.setContentsMargins(16, 16, 16, 16)
 
-        intro = QLabel(
-            'Some files in your library are byte-for-byte identical. '
-            'Tick the copy (or copies) you want to keep in each group - use "Keep both" '
-            'to keep all of them. When you apply, the copies you did not tick are '
-            'permanently deleted from both your merged and raw folders. This cannot be undone.'
-        )
+        if self._is_visual:
+            intro = QLabel(
+                'These files have the same photo/video content but different file bytes '
+                '(usually because Snapchat itself exported the same memory twice under '
+                'separate timestamps or IDs). Tick the copy (or copies) you want to keep in '
+                'each group - use "Keep both" to keep all of them. When you apply, the copies '
+                'you did not tick are permanently deleted from both your merged and raw '
+                'folders. This cannot be undone.'
+            )
+        else:
+            intro = QLabel(
+                'Some files in your library are byte-for-byte identical. '
+                'Tick the copy (or copies) you want to keep in each group - use "Keep both" '
+                'to keep all of them. When you apply, the copies you did not tick are '
+                'permanently deleted from both your merged and raw folders. This cannot be undone.'
+            )
         intro.setWordWrap(True)
         root.addWidget(intro)
 
@@ -252,7 +265,10 @@ class DuplicateReviewDialog(QDialog):
             default_keeper = entries_sorted[0].filename if entries_sorted else ''
             file_paths = [(e.filename, self.paths.merged_dir / e.filename) for e in entries_sorted]
 
-            box = QGroupBox(f'Duplicate group {sha_prefix} ({len(entries_sorted)} files)')
+            group_label = (
+                'Look-alike duplicate group' if self._is_visual else 'Identical duplicate group'
+            )
+            box = QGroupBox(f'{group_label} {sha_prefix} ({len(entries_sorted)} files)')
             box_layout = QVBoxLayout(box)
             box_layout.setSpacing(10)
             box_layout.setContentsMargins(10, 10, 10, 10)
@@ -293,6 +309,7 @@ class DuplicateReviewDialog(QDialog):
                 )
             )
             action_row = QHBoxLayout()
+            action_row.setContentsMargins(0, 0, 0, 0)
             action_row.addWidget(compare_btn)
             action_row.addWidget(keep_both_btn)
             action_row.addStretch(1)
@@ -302,6 +319,7 @@ class DuplicateReviewDialog(QDialog):
             self._group_ui.append((sha_prefix, entries_sorted, btn_group))
 
         buttons_row = QHBoxLayout()
+        buttons_row.setContentsMargins(0, 0, 0, 0)
         cancel_btn = QPushButton('Cancel')
         cancel_btn.setObjectName('toolbarBtn')
         apply_btn = QPushButton('Delete unselected duplicates')
@@ -502,6 +520,7 @@ class DuplicateReviewDialog(QDialog):
             'account_name': self.account_name,
             'source_folders': [str(folder) for _, folder in target_folders],
             'action': 'permanent_delete',
+            'scan_kind': 'visual' if self._is_visual else 'byte',
             'deleted_count': deleted,
             'group_selections': group_selections,
             'deleted_files': deleted_files,
@@ -542,9 +561,19 @@ class DuplicateReviewDialog(QDialog):
         needing to re-hash merged/ from scratch.
         """
         try:
-            from smd.duplicates import load_cached_duplicate_report
+            from smd.duplicates import (
+                BYTE_REPORT_NAME,
+                VISUAL_REPORT_NAME,
+                load_cached_duplicate_report,
+                load_cached_visual_duplicate_report,
+            )
 
-            cached = load_cached_duplicate_report(self.paths)
+            if self._is_visual:
+                cached = load_cached_visual_duplicate_report(self.paths)
+                report_name = VISUAL_REPORT_NAME
+            else:
+                cached = load_cached_duplicate_report(self.paths)
+                report_name = BYTE_REPORT_NAME
             if cached is None:
                 return
             resolved_prefixes = {
@@ -554,7 +583,8 @@ class DuplicateReviewDialog(QDialog):
                 return
             cached.entries = [e for e in cached.entries if e.sha256 not in resolved_prefixes]
             cached.duplicate_groups = len({e.sha256 for e in cached.entries})
-            report_path = self.paths.reports_dir / 'duplicates_report.json'
+            report_path = self.paths.reports_dir / report_name
             report_path.write_text(json.dumps(cached.to_dict(), indent=2), encoding='utf-8')
         except Exception:
             pass
+

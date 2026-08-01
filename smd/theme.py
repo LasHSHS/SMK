@@ -1,4 +1,4 @@
-"""SMD design system: typography, spacing, surfaces, and Qt stylesheets."""
+"""SMK design system: typography, spacing, surfaces, and Qt stylesheets."""
 from __future__ import annotations
 
 import sys
@@ -12,14 +12,22 @@ THEME_DARK = "dark"
 WINDOW_MIN_WIDTH = 1000
 WINDOW_MIN_HEIGHT = 680
 SIDEBAR_WIDTH = 220
-CONTENT_MAX_FORM = 1270
-CONTENT_MIN_FORM = 720
-CONTENT_MAX_DOCS = 1270
-CONTENT_MAX_NARROW = 1270
+# Column caps (comfort width when the window is wide).
+CONTENT_MAX_FORM = 1230
+CONTENT_MIN_FORM = 680
+CONTENT_MAX_DOCS = 1230
+CONTENT_MAX_NARROW = 1230
+# Outer SMK chrome → tab widget.
 PAGE_MARGIN_H = 28
 PAGE_MARGIN_V = 20
 CONTENT_AREA_MARGIN_H = PAGE_MARGIN_H
 CONTENT_AREA_MARGIN_V = PAGE_MARGIN_V
+# Tab pane (tab box) → content column (context boxes).
+# Visual inset ≈ TAB_PANE_PADDING + TAB_CONTENT_MARGIN_H (= 12px) each side.
+TAB_PANE_BORDER = 1
+TAB_PANE_PADDING = 4
+TAB_CONTENT_MARGIN_H = 8
+TAB_CONTENT_MARGIN_V = 12
 SECTION_GAP = 24
 CONTROL_GAP = 10
 FIELD_GAP = 8
@@ -225,7 +233,12 @@ def apply_status_property(widget, status: str) -> None:
 
 
 def apply_doc_browser_theme(browser, *, dark: bool) -> None:
-    """Match QTextBrowser HTML document colors to the active Qt theme."""
+    """Match QTextBrowser HTML document colors to the active Qt theme.
+
+    Title underlines are not done here — Qt's rich-text engine ignores
+    ``border-bottom`` on headings. Doc tabs rebuild HTML via
+    ``smd.help_content.headed_title`` (table bar) on theme sync.
+    """
     p = palette(dark)
     browser.document().setDefaultStyleSheet(
         f"body {{ color: {p['text']}; background-color: transparent; }}"
@@ -382,7 +395,7 @@ QTabWidget#mainTabs::pane, QTabWidget#resultsTabs::pane {{
     border-radius: 8px;
     background-color: {p['panel']};
     top: -1px;
-    padding: 8px;
+    padding: {TAB_PANE_PADDING}px;
 }}
 """
 
@@ -401,9 +414,11 @@ QLabel.sectionHeader {{
     font-family: {FONT_STACK_DISPLAY};
     font-size: {FONT_SIZE_SECTION}px;
     font-weight: 600;
-    padding: 0;
-    margin-top: 4px;
+    padding: 0 0 6px 0;
+    margin: 4px 0 4px 0;
     color: {p['text']};
+    border-bottom: 2px solid {p['secondary']};
+    /* Width hugs the text so the underline is not full-box. */
 }}
 QLabel.muted {{
     font-size: {FONT_SIZE_SMALL}px;
@@ -420,6 +435,9 @@ QLabel[status="err"] {{ color: {p['err']}; font-size: {FONT_SIZE_SMALL}px; font-
 QLabel[status="neutral"] {{ color: {p['muted']}; font-size: {FONT_SIZE_SMALL}px; }}
 QLabel {{
     background: transparent;
+}}
+QLabel:disabled {{
+    color: {p['disabled_fg']};
 }}
 QWidget#appHeader {{
     background-color: {p['raised']};
@@ -451,14 +469,21 @@ QFrame#contentSection {{
 QFrame#contentSection QLabel {{
     background: transparent;
 }}
-QLabel#sectionBoxTitle {{
+QLabel#sectionBoxTitle, QLabel#heroBoxTitle {{
     font-family: {FONT_STACK_DISPLAY};
     font-size: {FONT_SIZE_SECTION}px;
     font-weight: 600;
     color: {p['text']};
     background: transparent;
     padding: 0;
-    margin: 0 0 2px 0;
+    margin: 0;
+}}
+/* Short accent bar under section titles (see WindowChromeMixin._add_section_title). */
+QFrame#sectionTitleRule {{
+    background-color: {p['secondary']};
+    border: none;
+    max-height: 2px;
+    min-height: 2px;
 }}
 QFrame#heroSection {{
     background-color: {p['raised']};
@@ -467,15 +492,6 @@ QFrame#heroSection {{
 }}
 QFrame#heroSection QLabel {{
     background: transparent;
-}}
-QLabel#heroBoxTitle {{
-    font-family: {FONT_STACK_DISPLAY};
-    font-size: {FONT_SIZE_SECTION}px;
-    font-weight: 600;
-    color: {p['text']};
-    background: transparent;
-    padding: 0;
-    margin: 0 0 2px 0;
 }}
 QGroupBox#contentSection {{
     font-size: {FONT_SIZE_SECTION}px;
@@ -558,11 +574,10 @@ QLabel#detailed_status {{
 """
 
 
-def _checkbox_check_image(dark: bool) -> str:
-    """Transparent checkmark PNG for Qt stylesheets (dev + frozen builds)."""
+def _ui_asset(name: str) -> str:
+    """Resolve an assets/ui file for Qt stylesheets (dev + frozen builds)."""
     from smd.runtime import app_root, internal_root
 
-    name = 'checkbox-check-dark.png' if dark else 'checkbox-check-light.png'
     for base in (app_root(), internal_root(), Path(__file__).resolve().parent.parent):
         candidate = base / 'assets' / 'ui' / name
         if candidate.is_file():
@@ -571,9 +586,23 @@ def _checkbox_check_image(dark: bool) -> str:
     return ''
 
 
+def _checkbox_check_image(dark: bool) -> str:
+    """Transparent checkmark PNG for Qt stylesheets (dev + frozen builds)."""
+    name = 'checkbox-check-dark.png' if dark else 'checkbox-check-light.png'
+    return _ui_asset(name)
+
+
+def _combo_chevron_image(dark: bool) -> str:
+    # Light chevron on dark inputs; dark chevron on light inputs.
+    name = 'chevron_down_light.png' if dark else 'chevron_down_dark.png'
+    return _ui_asset(name)
+
+
 def _controls(p: dict[str, str], *, dark: bool = False) -> str:
     check_img = _checkbox_check_image(dark)
     checked_image_rule = f'image: url({check_img});' if check_img else ''
+    chevron = _combo_chevron_image(dark)
+    chevron_rule = f'image: url({chevron});' if chevron else ''
     return f"""
 QCheckBox {{
     spacing: 10px;
@@ -671,16 +700,47 @@ QWidget#dialogBody {{
     background-color: {p['bg']};
 }}
 QComboBox {{
-    padding: 7px 12px; min-height: 22px; font-size: {FONT_SIZE_BASE}px;
+    padding: 7px 32px 7px 12px; min-height: 22px; font-size: {FONT_SIZE_BASE}px;
     background: {p['input_bg']}; color: {p['text']};
     border: 1px solid {p['input_border']}; border-radius: 8px;
 }}
-QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox:on {{
+    border: 1px solid {p['secondary']};
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 28px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    width: 14px;
+    height: 10px;
+    {chevron_rule}
+}}
 QComboBox QAbstractItemView {{
-    background: {p['menu_bg']}; color: {p['text']};
-    border: 1px solid {p['input_border']};
+    background: {p['menu_bg']};
+    color: {p['text']};
+    border: 1px solid {p['border']};
+    outline: none;
     selection-background-color: {p['secondary']};
     selection-color: {p['secondary_text']};
+}}
+QComboBox QAbstractItemView::item {{
+    min-height: 28px;
+    padding: 6px 10px;
+    color: {p['text']};
+    background: {p['menu_bg']};
+    border: none;
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {p['secondary']};
+    color: {p['secondary_text']};
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background: {p['btn_hover']};
+    color: {p['btn_fg']};
 }}
 QMenuBar {{ background: transparent; color: {p['text']}; border: none; font-size: {FONT_SIZE_BASE}px; }}
 QMenuBar::item:selected {{ background: {p['btn_hover']}; border-radius: 4px; }}
@@ -713,6 +773,9 @@ QPushButton#accentBtn {{
     padding: 8px 18px; border-radius: 8px; font-weight: 700;
 }}
 QPushButton#accentBtn:hover {{ background: {p['secondary_hover']}; color: {p['secondary_text']}; }}
+QPushButton#accentBtn:disabled {{
+    background: {p['raised']}; color: {p['disabled_fg']}; border: 1px solid {p['border']};
+}}
 QPushButton#primaryAction {{
     background: {p['secondary']}; color: {p['secondary_text']}; border: 1px solid {p['btn_border']};
     padding: 10px 22px; border-radius: 8px; font-size: {FONT_SIZE_BASE}px; font-weight: 700;
@@ -729,6 +792,9 @@ QPushButton#runAction {{
 QPushButton#runAction:hover {{
     background: {p['primary_hover']}; color: {p['primary_text']}; border-color: {p['primary_hover']};
 }}
+QPushButton#runAction:disabled {{
+    background: {p['raised']}; color: {p['disabled_fg']}; border: 1px solid {p['border']};
+}}
 QPushButton#toolbarBtn {{
     padding: 6px 14px; font-size: {FONT_SIZE_TOOLBAR}px; font-weight: 600;
     background: {p['btn_bg']}; color: {p['btn_fg']};
@@ -736,6 +802,12 @@ QPushButton#toolbarBtn {{
 }}
 QPushButton#toolbarBtn:hover {{
     background: {p['btn_hover']}; color: {p['btn_fg']};
+}}
+QPushButton#toolbarBtn:disabled {{
+    /* Flat + muted = "not ready yet" (no gold/orange fill). */
+    background: {p['inset']};
+    color: {p['disabled_fg']};
+    border: 1px dashed {p['border']};
 }}
 QPushButton#dupThumbBtn {{
     background: {p['inset']};
@@ -810,6 +882,11 @@ QLineEdit, QSpinBox, QComboBox {{
     border-radius: 8px;
     padding: 8px 10px;
 }}
+QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{
+    background-color: {p['raised']};
+    color: {p['disabled_fg']};
+    border: 1px solid {p['border']};
+}}
 QTextEdit, QTextBrowser {{
     background-color: {p['inset']};
     color: {p['text']};
@@ -831,6 +908,17 @@ QPlainTextEdit#consoleLog, QTextEdit#consoleLog {{
     border: 1px solid {p['border']};
     border-radius: 8px;
     padding: 8px;
+    selection-background-color: {p['secondary']};
+    selection-color: {p['secondary_text']};
+}}
+QTextEdit#libraryCheckReport {{
+    font-family: "Segoe UI", sans-serif;
+    font-size: 12px;
+    background-color: {p['console_bg']};
+    color: {p['console_fg']};
+    border: 1px solid {p['border']};
+    border-radius: 8px;
+    padding: 10px;
     selection-background-color: {p['secondary']};
     selection-color: {p['secondary_text']};
 }}

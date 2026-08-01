@@ -21,31 +21,22 @@ class VideoEncodeProfile:
 
 # Snapchat's source video is already lossy-compressed by its own phone-app
 # encoder, so re-encoding it truly losslessly (x264 CRF 0 / QP 0) doesn't
-# recover or preserve any extra quality that wasn't already lost - it just
-# perfectly preserves the source's existing compression artifacts at 15-25x
-# the file size.
+# recover quality that wasn't already there - it just preserves Snapchat's
+# existing compression artifacts at 15-25x the file size (the "merged folder
+# suddenly tens of GB bigger" failure mode).
 #
-# Every value below targets the same "visually lossless" bar: VMAF >= ~99.9
-# (a perceptual quality score, 100 = pixel identical) against the old CRF 0
-# / QP 0 output, on a real overlay-merged Snapchat video. Encoders are NOT
-# interchangeable at the same nominal number - x264's CRF and each vendor's
-# QP/CQ scale have different rate-distortion curves, so each value was
-# picked separately rather than reusing one number everywhere:
-#   - x264 CRF 16              -> measured 63 MB (was 484 MB), VMAF 99.96
-#     [hardware-tested here with real Snapchat overlay video + VMAF]
-#   - AMD AMF QP 22             -> measured 65 MB (was 484 MB), VMAF 99.91
-#     [hardware-tested here with real Snapchat overlay video + VMAF]
-#   - NVIDIA NVENC CQ 18, Intel QSV global_quality 18 -> not verified on real
-#     hardware (none available while tuning this). Set from published
-#     third-party CRF/CQ-equivalence benchmarks instead of a guess: NVENC CQ
-#     18 and QSV global_quality ~18-25 are independently reported as the
-#     "visually lossless" tier matching x264 CRF 16-18. If you have this
-#     hardware and can confirm/adjust these with a real VMAF test (see
-#     AMD_AMF_QP above for the method), that's a welcome follow-up.
-CPU_X264_CRF = 16
-AMD_AMF_QP = 22
-NVIDIA_NVENC_CQ = 18
-INTEL_QSV_QUALITY = 18
+# After burning a caption, the whole frame must be re-encoded as one stream
+# (you cannot keep the original video bitstream and only compress the overlay).
+# These values sit between "looks soft vs raw/" and "absurd lossless size":
+# a small step sharper than the 2026-07-11 visually-lossless tune, still far
+# from CRF 0 / QP 0. Encoders are NOT interchangeable at the same number:
+#   - x264 CRF 14   (was 16)  - CPU fallback
+#   - AMD AMF QP 18 (was 22)  - this machine's Las runs
+#   - NVENC CQ 16 / QSV 16 (was 18) - same relative nudge; not VMAF-reverified
+CPU_X264_CRF = 14
+AMD_AMF_QP = 18
+NVIDIA_NVENC_CQ = 16
+INTEL_QSV_QUALITY = 16
 
 
 @lru_cache(maxsize=4)
@@ -85,7 +76,7 @@ def _working_gpu_encoder(ffmpeg: str) -> str | None:
     """Which GPU encoder (if any) can actually produce output on *this*
     hardware - not just which ones ffmpeg was compiled with.
 
-    "Full" ffmpeg builds (including the one SMD bundles) compile in the
+    "Full" ffmpeg builds (including the one SMK bundles) compile in the
     NVENC/AMF/QSV wrapper code regardless of what GPU is installed, so
     `-encoders` lists all three even on, say, an AMD-only machine with no
     NVIDIA hardware at all. Checking that list alone (the old approach)

@@ -7,7 +7,7 @@ import sys
 from typing import Any
 
 from smd.ffmpeg_bundle import bundled_status, resolve_ffmpeg, resolve_ffprobe, verify_tool
-from smd.help_content import _callout
+from smd.help_content import _callout, headed_title
 from smd.runtime import (
     app_root,
     display_path,
@@ -30,11 +30,10 @@ _BODY = (
     "border-bottom: 1px solid rgba(128,128,128,0.3); }"
     " th { font-weight: 700; width: 34%; }"
 )
+# Title spacing from headed_title (level 3); light section separator only.
 _SECTION = (
-    "margin: 28px 0 32px; padding: 0 0 24px; border-bottom: 1px solid rgba(128,128,128,0.35);"
+    "margin: 8px 0 8px; padding: 0 0 18px; border-bottom: 1px solid rgba(128,128,128,0.35);"
 )
-_H2 = "margin: 0 0 12px; font-size: 22px;"
-_H3 = "margin: 0 0 10px; font-size: 18px;"
 _MUTED = "opacity:0.85;font-size:14px;"
 
 
@@ -121,8 +120,15 @@ def _component_cell(ok: bool, path: str, version: str, ok_hint: str, fail_hint: 
     )
 
 
-def build_about_html(*, web_engine_available: bool) -> str:
-    facts = gather_about_facts(web_engine_available=web_engine_available)
+def build_about_html(
+    *,
+    web_engine_available: bool,
+    accent: str | None = None,
+    facts: dict[str, Any] | None = None,
+) -> str:
+    # facts may be cached across theme toggles (ffmpeg -version is slow).
+    if facts is None:
+        facts = gather_about_facts(web_engine_available=web_engine_available)
     map_status = (
         "Available - interactive map in File Checker."
         if facts["web_engine_ok"]
@@ -133,7 +139,7 @@ def build_about_html(*, web_engine_available: bool) -> str:
         f'<div style="{_BODY}">',
         # --- Header ---
         f"<section style='{_SECTION}'>",
-        f"<h2 style='{_H2}'>Snapchat Memories Downloader (SMD)</h2>",
+        headed_title('Snapchat Memories Keeper (SMK)', level=2, accent=accent),
         f"<p>Version <b>{html.escape(facts['version'])}</b> - turns your Snapchat Memories export "
         "into a normal photo and video library on your PC, with capture dates, GPS, and filters "
         "preserved where Snapchat included them.</p>",
@@ -145,24 +151,24 @@ def build_about_html(*, web_engine_available: bool) -> str:
         "</section>",
         # --- Privacy ---
         f"<section style='{_SECTION}'>",
-        f"<h3 style='{_H3}'>Privacy &amp; trust</h3>",
+        headed_title('Privacy & trust', level=3, accent=accent),
         _callout(
             "ok",
             "Your data stays on your machine",
             "<ul style='margin:0 0 0 18px;padding:0;'>"
-            "<li><b>No telemetry</b> - SMD does not phone home or collect usage analytics</li>"
+            "<li><b>No telemetry</b> - SMK does not phone home or collect usage analytics</li>"
             "<li><b>Local processing</b> - export ZIPs and output media never leave your PC</li>"
             "<li><b>Offline by default</b> - memory processing needs no internet; "
             "the optional GPS map may load map tiles when you open File Checker</li>"
             "</ul>",
         ),
-        "<p>SMD only opens files and folders you choose. It does not access your Snapchat account "
+        "<p>SMK only opens files and folders you choose. It does not access your Snapchat account "
         "or anything outside the export you provide.</p>",
         "</section>",
         # --- System status ---
         f"<section style='{_SECTION}'>",
-        f"<h3 style='{_H3}'>System status</h3>",
-        "<p>Quick check that this copy of SMD is ready to process video and maps.</p>",
+        headed_title('System status', level=3, accent=accent),
+        "<p>Quick check that this copy of SMK is ready to process video and maps.</p>",
         _info_table(
             [
                 (
@@ -182,7 +188,7 @@ def build_about_html(*, web_engine_available: bool) -> str:
                         facts["ffmpeg_path"],
                         facts["ffmpeg_version"],
                         "Video overlays and metadata tagging.",
-                        "Missing - reinstall SMD or add tools under "
+                        "Missing - reinstall SMK or add tools under "
                         "<code>{install}\\tools\\ffmpeg\\</code>.",
                     ),
                 ),
@@ -205,7 +211,7 @@ def build_about_html(*, web_engine_available: bool) -> str:
                     "Tool source",
                     f"{facts['tool_source']}<br/>"
                     f"<span style='{_MUTED}'>"
-                    "<code>bundled</code> = shipped with SMD · "
+                    "<code>bundled</code> = shipped with SMK · "
                     "<code>system PATH</code> = dev/source runs only</span>",
                 ),
             ]
@@ -213,13 +219,13 @@ def build_about_html(*, web_engine_available: bool) -> str:
         "</section>",
         # --- Support ---
         f"<section style='{_SECTION}'>",
-        f"<h3 style='{_H3}'>Support the project</h3>",
+        headed_title('Support the project', level=3, accent=accent),
         support_options_html(),
         f"<p>Source code, issues, and releases: <a href='{AUTHOR_URL}'>GitHub - LasHSHS</a></p>",
         "</section>",
         # --- Technical details ---
         f"<section style='{_SECTION} border-bottom:none;'>",
-        f"<h3 style='{_H3}'>Technical details</h3>",
+        headed_title('Technical details', level=3, accent=accent),
         f"<p style='{_MUTED}'>For bug reports. Paths use placeholders - "
         "<code>{install}</code> is this app's folder - so nothing personal is exposed.</p>",
     ]

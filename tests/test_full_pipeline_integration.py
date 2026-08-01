@@ -167,7 +167,7 @@ def test_full_run_produces_correct_outputs_and_passes_verification(tmp_path):
     assert overlay_applied_count == 1  # the overlay image
 
     # Checkpoint reflects all 3 items as done.
-    done, skipped, _version = _load_checkpoint(paths.checkpoint_path)
+    done, skipped, _version, _outputs = _load_checkpoint(paths.checkpoint_path)
     assert len(done) == 3
     assert not skipped
 
@@ -206,7 +206,7 @@ def test_resume_reprocesses_item_after_missing_merged_output(tmp_path):
     assert restored.is_file()
     assert len(list(paths2.merged_dir.iterdir())) == 3
 
-    done, _skipped, _version = _load_checkpoint(paths2.checkpoint_path)
+    done, _skipped, _version, _outputs = _load_checkpoint(paths2.checkpoint_path)
     assert len(done) == 3
 
     report = check_staging_readiness(account_dir, layout=paths2)

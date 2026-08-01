@@ -33,6 +33,17 @@ _trace.txt
 _t.txt
 _t2.txt
 _startup_test.txt
+debug-*.log
+smd_live_*.txt
+smd_*_err.txt
+smd_*_out.txt
+*_boot_probe.py
+SMD-*-portable*.zip
+SMK-*-portable*.zip
+*.portable-win64.zip
+
+# Local Cursor plans (keep rules if tracked intentionally)
+.cursor/plans/
 
 # Reference material and third-party clones (dev-only, not shipped)
 extra/

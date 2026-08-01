@@ -1,4 +1,4 @@
-"""Reusable Qt widgets for the SMD desktop GUI."""
+"""Reusable Qt widgets for the SMK desktop GUI."""
 from __future__ import annotations
 
 import os
@@ -20,22 +20,34 @@ class StreamRedirector(QObject):
 
     write() may be called from any thread (workers use print()), so lines are
     delivered through a queued Qt signal instead of touching widgets directly.
+
+    Optionally also writes to the original stream (``also``) so launching via
+    ``python.exe`` / SMKTester.bat keeps a working console - fully replacing
+    console stdout on Windows was crashing native code (0xC0000409) during
+    ``sys.stdout = redirector``.
     """
 
     line_written = pyqtSignal(str)
 
-    def __init__(self, callback):
+    def __init__(self, callback, also=None):
         super().__init__()
         import threading
 
         self._lock = threading.Lock()
         self._buffer = ""
+        self._also = also
         # Queued connection: slot always runs on the GUI thread.
         self.line_written.connect(callback, Qt.QueuedConnection)
 
     def write(self, text: str) -> None:
         if not text:
             return
+        if self._also is not None:
+            try:
+                self._also.write(text)
+                self._also.flush()
+            except Exception:
+                pass
         lines = []
         with self._lock:
             self._buffer += text
@@ -44,15 +56,31 @@ class StreamRedirector(QObject):
                 if line:
                     lines.append(line.rstrip())
         for line in lines:
-            self.line_written.emit(line)
+            try:
+                self.line_written.emit(line)
+            except Exception:
+                pass
 
     def flush(self) -> None:
+        if self._also is not None:
+            try:
+                self._also.flush()
+            except Exception:
+                pass
         with self._lock:
             pending, self._buffer = self._buffer, ""
         if pending:
-            self.line_written.emit(pending.rstrip())
+            try:
+                self.line_written.emit(pending.rstrip())
+            except Exception:
+                pass
 
     def isatty(self) -> bool:
+        if self._also is not None:
+            try:
+                return bool(self._also.isatty())
+            except Exception:
+                pass
         return False
 
 
@@ -148,6 +176,9 @@ class DocBrowser(QTextBrowser):
         self.setObjectName('docReader')
         self.setReadOnly(True)
         self.setOpenExternalLinks(True)
+        # Qt's default right-click menu (Copy / Select All) on read-only docs
+        # feels like an editable field — links still work via left-click.
+        self.setContextMenuPolicy(Qt.NoContextMenu)
         self.setFrameShape(QTextBrowser.NoFrame)
         self.setLineWrapMode(QTextEdit.WidgetWidth)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -156,7 +187,9 @@ class DocBrowser(QTextBrowser):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.document().setTextWidth(self.viewport().width())
+        tw = self.viewport().width()
+        if self.document().textWidth() != tw:
+            self.document().setTextWidth(tw)
 
 
 class FlowDocBrowser(DocBrowser):
@@ -167,8 +200,14 @@ class FlowDocBrowser(DocBrowser):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._syncing_height = False
-        self.document().contentsChanged.connect(self._sync_height)
+        self._height_timer = QTimer(self)
+        self._height_timer.setSingleShot(True)
+        self._height_timer.timeout.connect(self._sync_height)
+        self.document().contentsChanged.connect(self._request_sync_height)
         QTimer.singleShot(0, self._sync_height)
+
+    def _request_sync_height(self) -> None:
+        self._height_timer.start(24)
 
     def _sync_height(self) -> None:
         # Guard: setTextWidth fires contentsChanged and setMin/MaxHeight fires
@@ -191,7 +230,7 @@ class FlowDocBrowser(DocBrowser):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._sync_height()
+        self._request_sync_height()
 
 
 class WidthAwareColumn(QWidget):
@@ -203,73 +242,128 @@ class WidthAwareColumn(QWidget):
         max_width: int,
         margins: tuple[int, int, int, int] | None = None,
         min_width: int = 520,
+        *,
+        fill_height: bool = False,
         parent=None,
     ):
         super().__init__(parent)
-        from smd.theme import PAGE_MARGIN_H, PAGE_MARGIN_V, enable_styled_surface
+        from smd.theme import (
+            TAB_CONTENT_MARGIN_H,
+            TAB_CONTENT_MARGIN_V,
+            enable_styled_surface,
+        )
 
         self.setObjectName('contentColumn')
         enable_styled_surface(self)
         self._content = content
         self._max_width = max_width
         self._min_width = min_width
-        self._margins = margins or (PAGE_MARGIN_H, PAGE_MARGIN_V, PAGE_MARGIN_H, PAGE_MARGIN_V)
+        # Tight inset inside the tab pane (not the outer PAGE_MARGIN_H=28).
+        self._margins = margins or (
+            TAB_CONTENT_MARGIN_H,
+            TAB_CONTENT_MARGIN_V,
+            TAB_CONTENT_MARGIN_H,
+            TAB_CONTENT_MARGIN_V,
+        )
         self._row = QHBoxLayout(self)
         self._row.setContentsMargins(*self._margins)
         self._row.addStretch(1)
-        content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._row.addWidget(content, 1)
+        if fill_height:
+            # Help/About/Palestine: DocBrowser fills the tab height.
+            content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self._row.addWidget(content, 1)
+        else:
+            # Save Memories / Guide: hug content, stay at top (no mid-float).
+            content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            self._row.setAlignment(Qt.AlignTop)
+            self._row.addWidget(content, 1, Qt.AlignTop)
         self._row.addStretch(1)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Width updates come from WindowChromeMixin resize / tab-change
+        # refresh — a per-column resize timer duplicated that work and lagged.
         QTimer.singleShot(0, self._apply_content_width)
 
-    def _reference_width(self) -> int:
-        """Width to size against. Prefer the main QTabWidget over self.width():
-        once _content's minimum width is raised, self.width() can never report a
-        smaller number afterwards (the layout won't shrink us below our own
-        content's minimum), which would otherwise wedge this column at whatever
-        width it first happened to compute during the very first layout pass.
-        QTabWidget#mainTabs is also reliable for columns that live on a tab page
-        that isn't the current page yet - a hidden page's own width can be
-        stale, but the always-visible tab widget itself is up to date."""
+    def _scroll_ancestor(self) -> QScrollArea | None:
+        p = self.parentWidget()
+        while p is not None:
+            if isinstance(p, QScrollArea):
+                return p
+            p = p.parentWidget()
+        return None
+
+    def _tab_pane_inner_width(self) -> int:
+        """Inner width of the main tab pane (inside border + QSS padding)."""
+        from smd.theme import TAB_PANE_BORDER, TAB_PANE_PADDING
+
         top = self.window()
         tabs = top.findChild(QTabWidget, 'mainTabs') if top is not None else None
-        if tabs is not None and tabs.width() > 0:
-            return tabs.width()
+        if tabs is None or tabs.width() <= 0:
+            return 0
+        # Full tab widget is wider than the pane content area — using it raw
+        # made the context column overflow and kiss the pane edges.
+        return max(
+            0,
+            tabs.width() - 2 * TAB_PANE_BORDER - 2 * TAB_PANE_PADDING,
+        )
+
+    def _reference_width(self) -> int:
+        """Width of the tab content area to size the context column against.
+
+        Prefer the scroll viewport when this column is visible (exact fit).
+        For hidden tabs, use the live mainTabs pane width so we don't wedge on
+        a stale self.width() after raising content min-width.
+        """
+        pane = self._tab_pane_inner_width()
+        scroll = self._scroll_ancestor()
+        if scroll is not None:
+            vw = scroll.viewport().width()
+            if vw > 0 and self.isVisible():
+                return vw
+        if pane > 0:
+            return pane
+        if scroll is not None and scroll.viewport().width() > 0:
+            return scroll.viewport().width()
         parent = self.parentWidget()
         if parent is not None and parent.width() > 0:
             return parent.width()
         return self.width()
 
-    def _apply_content_width(self) -> None:
+    def _apply_content_width(self, *, sync_docs: bool | None = None) -> None:
         left, _top, right, _bottom = self._margins
+        # Context box must stay inside the tab box with the side margins intact
+        # (~12px = pane padding + column margin). Hard-lock width — never wider
+        # than available, never ignore the max comfort cap when the window is wide.
         available = max(0, self._reference_width() - left - right)
-        floor = self._min_width
-        if self._max_width > 0:
-            if available >= floor:
-                content_w = min(self._max_width, available)
-            else:
-                content_w = floor
-            self._content.setMinimumWidth(content_w)
-            self._content.setMaximumWidth(min(self._max_width, max(available, floor)))
-        else:
-            content_w = max(floor, available)
+        cap = self._max_width if self._max_width > 0 else available
+        content_w = max(0, min(cap, available))
+        if (
+            self._content.minimumWidth() != content_w
+            or self._content.maximumWidth() != content_w
+        ):
             self._content.setMinimumWidth(content_w)
             self._content.setMaximumWidth(content_w)
-        self._sync_doc_browsers(self._content)
+            width_changed = True
+        else:
+            width_changed = False
+        # Doc reflow: default = only when width changed (DocBrowser.resizeEvent
+        # also reflows). Tab-switch passes sync_docs=True to force a catch-up.
+        if sync_docs is None:
+            do_sync = width_changed and self.isVisible()
+        else:
+            do_sync = bool(sync_docs)
+        if do_sync:
+            self._sync_doc_browsers(self._content)
 
     @staticmethod
     def _sync_doc_browsers(widget: QWidget) -> None:
         if isinstance(widget, DocBrowser):
-            widget.document().setTextWidth(widget.viewport().width())
+            tw = widget.viewport().width()
+            if widget.document().textWidth() != tw:
+                widget.document().setTextWidth(tw)
         for child in widget.findChildren(DocBrowser):
-            child.document().setTextWidth(child.viewport().width())
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._apply_content_width()
-        if isinstance(self._content, DocBrowser):
-            self._content.document().setTextWidth(self._content.viewport().width())
+            tw = child.viewport().width()
+            if child.document().textWidth() != tw:
+                child.document().setTextWidth(tw)
 
 
 def _accent_play_button_qss() -> str:
@@ -463,7 +557,7 @@ class ProcessingShieldOverlay(QWidget):
     per-section instead (see _set_run_lockout) so the Run section's
     Start/Cancel button and the live dashboard stay clickable and scrollable
     - this overlay used to cover the whole window during the active run too,
-    which blocked scrolling the dashboard and made SMD look unresponsive."""
+    which blocked scrolling the dashboard and made SMK look unresponsive."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -474,14 +568,15 @@ class ProcessingShieldOverlay(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(32, 32, 32, 32)
-        outer.addStretch(2)
+        outer.addStretch(1)
 
+        # Horizontal centering via stretch + fixed-width panel (AlignCenter alone
+        # left the panel hugging the left edge on some Windows/PyQt builds).
+        row = QHBoxLayout()
+        row.addStretch(1)
         self._panel = QFrame()
         self._panel.setObjectName('contentPanel')
-        # Modest floor size - just enough that 3 short wrapped lines never
-        # clip, without ballooning into empty whitespace for typical hints.
-        self._panel.setMinimumWidth(480)
-        self._panel.setMaximumWidth(640)
+        self._panel.setFixedWidth(520)
         from smd.theme import enable_styled_surface
 
         enable_styled_surface(self._panel)
@@ -491,22 +586,22 @@ class ProcessingShieldOverlay(QWidget):
 
         self.title_label = QLabel('Verifying your files…')
         self.title_label.setProperty('class', 'sectionHeader')
-        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        self.title_label.setWordWrap(True)
         panel_lay.addWidget(self.title_label)
 
-        self.hint_label = QLabel('Please wait. SMD will show a summary when finished.')
+        self.hint_label = QLabel('Please wait. SMK will show a summary when finished.')
         self.hint_label.setWordWrap(True)
-        self.hint_label.setAlignment(Qt.AlignCenter)
+        self.hint_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.hint_label.setProperty('class', 'caption')
-        # Enough for ~3 wrapped lines at the caption font size - fixes the
-        # earlier bug where a 0-height label clipped its own last line,
-        # without the previous overcorrection to a much taller fixed panel.
         self.hint_label.setMinimumHeight(58)
-        self.hint_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self.hint_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         panel_lay.addWidget(self.hint_label)
 
-        outer.addWidget(self._panel, 0, Qt.AlignCenter)
-        outer.addStretch(3)
+        row.addWidget(self._panel, 0, Qt.AlignCenter)
+        row.addStretch(1)
+        outer.addLayout(row)
+        outer.addStretch(1)
 
     def set_hint(self, text: str, *, title: str | None = None) -> None:
         """Update the overlay copy and force a layout pass so nothing clips."""
@@ -629,44 +724,22 @@ class FullScreenMediaPopup(QWidget):
             
             file_ext = os.path.splitext(file_path)[1].lower()
             
-            if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp']:
-                # Display image
-                img = Image.open(file_path)
-                
-                # Scale to fit screen (max 90% of screen size)
-                screen = QApplication.primaryScreen().geometry()
-                max_width = int(screen.width() * 0.8)
-                max_height = int(screen.height() * 0.7)
-                img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-                
-                # Convert to QPixmap
-                from PIL import ImageQt
-                pixmap = ImageQt.toqpixmap(img)
-                
+            if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.heic']:
+                pixmap = self._load_preview_pixmap(file_path)
+                if pixmap is None or pixmap.isNull():
+                    # Fall back to the OS viewer rather than a blank error.
+                    self.open_in_player(file_path)
+                    return
                 img_label = QLabel()
                 img_label.setPixmap(pixmap)
                 img_label.setAlignment(Qt.AlignCenter)
                 img_label.setStyleSheet('background-color: transparent;')
-                
                 self.content_layout.addWidget(img_label)
             
             elif file_ext in ['.mp4', '.m4v', '.avi', '.mov', '.mkv']:
-                # Display video info
-                video_label = QLabel(f'🎥 Video File\n\n{filename}')
-                video_label.setAlignment(Qt.AlignCenter)
-                video_label.setStyleSheet("""
-                    color: white;
-                    font-size: 18px;
-                    padding: 60px;
-                """)
-                self.content_layout.addWidget(video_label)
-                
-                # Add play button
-                play_btn = QPushButton('Open with default player')
-                play_btn.setFixedSize(300, 60)
-                play_btn.setStyleSheet(_accent_play_button_qss())
-                play_btn.clicked.connect(lambda: self.open_in_player(file_path))
-                self.content_layout.addWidget(play_btn)
+                # Videos play in the system player (same as map click).
+                self.open_in_player(file_path)
+                return
             
             else:
                 self.show_error(f"Unsupported file type: {file_ext}")
@@ -679,6 +752,32 @@ class FullScreenMediaPopup(QWidget):
         
         except Exception as e:
             self.show_error(f"Error opening file: {str(e)}")
+
+    def _load_preview_pixmap(self, file_path: str) -> QPixmap | None:
+        """Load a photo for the overlay; prefer Qt, then PIL (RGB-safe)."""
+        screen = QApplication.primaryScreen().geometry()
+        max_width = int(screen.width() * 0.8)
+        max_height = int(screen.height() * 0.7)
+
+        pixmap = QPixmap(file_path)
+        if not pixmap.isNull():
+            return pixmap.scaled(
+                max_width,
+                max_height,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+
+        try:
+            img = Image.open(file_path)
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            from PIL import ImageQt
+            return ImageQt.toqpixmap(img)
+        except Exception as exc:
+            print(f"DEBUG: Photo preview failed for {file_path}: {exc}")
+            return None
 
     def show_media(self, file_path):
         """Compatibility wrapper for show_export_example usage."""
@@ -768,13 +867,20 @@ class LiveRunDashboard(QWidget):
         self.setVisible(False)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
+        from smd.theme import CONTROL_GAP, SECTION_PADDING
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(
+            SECTION_PADDING, SECTION_PADDING, SECTION_PADDING, SECTION_PADDING
+        )
+        root.setSpacing(CONTROL_GAP)
 
         header = QHBoxLayout()
-        title = QLabel("Live run dashboard")
-        title.setProperty("class", "sectionTitle")
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(CONTROL_GAP)
+        title = QLabel("📊 Live run")
+        title.setProperty("class", "sectionHeader")
+        title.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         header.addWidget(title)
         header.addStretch(1)
         self.header_hint = QLabel("")
@@ -783,15 +889,16 @@ class LiveRunDashboard(QWidget):
         root.addLayout(header)
 
         grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(CONTROL_GAP)
+        grid.setVerticalSpacing(CONTROL_GAP)
 
-        self.stat_pct = self._stat_card("Progress", "0%")
-        self.stat_files = self._stat_card("Files", "0 / 0")
-        self.stat_speed = self._stat_card("Speed", "-")
-        self.stat_eta = self._stat_card("Time left", "-")
-        self.stat_elapsed = self._stat_card("Elapsed", "0:00")
-        self.stat_phase = self._stat_card("Step", "Waiting")
+        self.stat_pct = self._stat_card("📈 Progress", "0%", large=True)
+        self.stat_files = self._stat_card("📁 Files", "0 / 0")
+        self.stat_speed = self._stat_card("⚡ Speed", "-")
+        self.stat_eta = self._stat_card("⏳ Time left", "-")
+        self.stat_elapsed = self._stat_card("⏱️ Elapsed", "0:00")
+        self.stat_phase = self._stat_card("🧭 Step", "Waiting")
 
         grid.addWidget(self.stat_pct[0], 0, 0)
         grid.addWidget(self.stat_files[0], 0, 1)
@@ -801,7 +908,7 @@ class LiveRunDashboard(QWidget):
         grid.addWidget(self.stat_phase[0], 1, 2)
         root.addLayout(grid)
 
-        self.status_line = QLabel("Ready to start.")
+        self.status_line = QLabel("✨ Ready to start.")
         self.status_line.setWordWrap(True)
         self.status_line.setProperty("status", "neutral")
         root.addWidget(self.status_line)
@@ -809,31 +916,32 @@ class LiveRunDashboard(QWidget):
         self.log = QPlainTextEdit()
         self.log.setObjectName("runActivityLog")
         self.log.setReadOnly(True)
-        self.log.setMinimumHeight(160)
+        self.log.setMinimumHeight(320)
         # 0 = unlimited - a full run can produce several thousand lines and
         # users need to scroll all the way back to the start, not just the
         # last few hundred lines.
         self.log.setMaximumBlockCount(0)
         root.addWidget(self.log, 1)
 
-    def _stat_card(self, title: str, initial: str) -> tuple[QFrame, QLabel]:
+    def _stat_card(
+        self, title: str, initial: str, *, large: bool = False
+    ) -> tuple[QFrame, QLabel]:
         card = QFrame()
         card.setObjectName("runStatCard")
         from smd.theme import enable_styled_surface
 
         enable_styled_surface(card)
         card.setAttribute(Qt.WA_StyledBackground, True)
-        is_progress = title == "Progress"
-        card.setMinimumHeight(76 if is_progress else 68)
+        card.setMinimumHeight(76)
         lay = QVBoxLayout(card)
         lay.setContentsMargins(12, 10, 12, 12)
         lay.setSpacing(6)
         lbl = QLabel(title)
         lbl.setObjectName("runStatTitle")
         val = QLabel(initial)
-        val.setObjectName("runStatValueLarge" if is_progress else "runStatValue")
+        val.setObjectName("runStatValueLarge" if large else "runStatValue")
         val.setWordWrap(True)
-        if is_progress:
+        if large:
             val.setMinimumHeight(34)
             val.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         lay.addWidget(lbl)
@@ -847,10 +955,10 @@ class LiveRunDashboard(QWidget):
         self.set_value(self.stat_eta[1], "-")
         self.set_value(self.stat_elapsed[1], "0:00")
         self.set_value(self.stat_phase[1], "Starting")
-        self.status_line.setText("Starting…")
+        self.status_line.setText("🚀 Starting…")
         self.log.clear()
         if planned_estimate:
-            self.header_hint.setText(f"Planned ~{planned_estimate}")
+            self.header_hint.setText(f"🗓️ Planned ~{planned_estimate}")
         else:
             self.header_hint.setText("")
 

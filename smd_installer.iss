@@ -1,15 +1,15 @@
-; Snapchat Memories Downloader - Inno Setup Script
+; Snapchat Memories Keeper - Inno Setup Script
 ; Creates a professional Windows installer
 
 [Setup]
-AppName=Snapchat Memories Downloader
+AppName=Snapchat Memories Keeper
 AppVersion=1.0.0
 AppPublisher=Las HS
 AppPublisherURL=https://github.com/LasHSHS
-DefaultDirName={autopf}\Snapchat Memories Downloader
-DefaultGroupName=Snapchat Memories Downloader
+DefaultDirName={autopf}\Snapchat Memories Keeper
+DefaultGroupName=Snapchat Memories Keeper
 OutputDir=installer_output
-OutputBaseFilename=Snapchat-Memories-Downloader-Setup
+OutputBaseFilename=Snapchat-Memories-Keeper-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -19,7 +19,7 @@ AllowNoIcons=yes
 ShowLanguageDialog=no
 LicenseFile=LICENSE
 SetupIconFile=icon.ico
-UninstallDisplayIcon={app}\SMD.exe
+UninstallDisplayIcon={app}\SMK.exe
 DisableWelcomePage=no
 
 ; Modern UI settings - using built-in defaults
@@ -35,14 +35,14 @@ Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Create Start Menu shortcuts
-Name: "{group}\Snapchat Memories Downloader"; Filename: "{app}\SMD.exe"; IconFilename: "{app}\icon.ico"; Comment: "Download your Snapchat memories"; WorkingDir: "{app}"
-Name: "{group}\Uninstall Snapchat Memories Downloader"; Filename: "{uninstallexe}"
+Name: "{group}\Snapchat Memories Keeper"; Filename: "{app}\SMK.exe"; IconFilename: "{app}\icon.ico"; Comment: "Keep your Snapchat memories offline"; WorkingDir: "{app}"
+Name: "{group}\Uninstall Snapchat Memories Keeper"; Filename: "{uninstallexe}"
 ; Optional: Create desktop shortcut
-Name: "{userdesktop}\Snapchat Memories Downloader"; Filename: "{app}\SMD.exe"; IconFilename: "{app}\icon.ico"; Comment: "Download your Snapchat memories"; WorkingDir: "{app}"
+Name: "{userdesktop}\Snapchat Memories Keeper"; Filename: "{app}\SMK.exe"; IconFilename: "{app}\icon.ico"; Comment: "Keep your Snapchat memories offline"; WorkingDir: "{app}"
 
 [Run]
 ; Ask user if they want to launch the app after installation
-Filename: "{app}\SMD.exe"; Description: "Launch Snapchat Memories Downloader"; Flags: nowait postinstall skipifsilent unchecked; WorkingDir: "{app}"
+Filename: "{app}\SMK.exe"; Description: "Launch Snapchat Memories Keeper"; Flags: nowait postinstall skipifsilent unchecked; WorkingDir: "{app}"
 
 [InstallDelete]
 ; Clean up old versions
@@ -61,9 +61,9 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpFinished then
-    MsgBox('Snapchat Memories Downloader has been installed successfully!' + #13#13 +
+    MsgBox('Snapchat Memories Keeper has been installed successfully!' + #13#13 +
            'Everything is included — no Python, ffmpeg, or other tools to install.' + #13#13 +
-           'Click Finish, then open SMD from the Start Menu.' + #13#13 +
-           'For support, visit: https://github.com',
+           'Click Finish, then open SMK from the Start Menu.' + #13#13 +
+           'For support, visit: https://github.com/LasHSHS/SMK',
            mbInformation, MB_OK);
 end;

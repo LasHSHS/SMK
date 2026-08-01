@@ -1,4 +1,4 @@
-"""Resolve bundled ffmpeg/ffprobe (all-in-one SMD package) or system PATH fallback."""
+"""Resolve bundled ffmpeg/ffprobe (all-in-one SMK package) or system PATH fallback."""
 from __future__ import annotations
 
 import shutil

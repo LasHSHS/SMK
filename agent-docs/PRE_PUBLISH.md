@@ -1,4 +1,4 @@
-# SMD — Pre-publication checklist
+# SMK — Pre-publication checklist
 
 Author: **Las HS** — [las-hs.com](https://las-hs.com)
 
@@ -18,19 +18,19 @@ Use this list before publishing to GitHub, creating a release, or distributing t
 
 ## 2. Git repository
 
-- [ ] Create repo (e.g. `Snapchat-Memories-Downloader` or `SMD`)
+- [ ] Create repo (e.g. `Snapchat-Memories-Keeper` or `SMK`)
 - [ ] `.gitignore` excludes: `.venv/`, `dist/`, `accounts/`, `*.log`, user exports, `technical/staging/`
 - [ ] No secrets in history (API keys, passwords, personal exports)
 - [ ] Initial commit message describes purpose, not “fix stuff”
 - [ ] Tag release: `v1.0.0` with changelog
-- [ ] GitHub release attaches built `smd.exe` / installer from `build_smd.ps1`
+- [ ] GitHub release attaches built `SMK.exe` / installer from `build_smk.ps1`
 
 ---
 
 ## 3. Quality & testing (your export)
 
 - [ ] Full bundled export processed (13k+ files for Las account)
-- [ ] **Verify staging** passes before deleting `technical/staging/`
+- [ ] After a clean run, `technical/staging/` is auto-removed (or left if verify failed)
 - [ ] **Review duplicates** — keep the copies you want; the rest are permanently deleted
 - [ ] Spot-check: merged vs raw on photos with/without overlays
 - [ ] Run on clean Windows 10 and Windows 11 VM (no Python installed)
@@ -42,7 +42,7 @@ Use this list before publishing to GitHub, creating a release, or distributing t
 ## 4. Build & distribute
 
 - [ ] `powershell -ExecutionPolicy Bypass -File .\build_smd.ps1`
-- [ ] Test `Run-SMD.bat` from Desktop shortcut on non-dev PC
+- [ ] Test Desktop `SMKTester.bat` (dev) and packaged `SMK.exe` on a non-dev PC
 - [ ] ffmpeg bundled in official build (`tools/ffmpeg/` or PyInstaller bundle)
 - [ ] Version number consistent: `smd/version.py`, About dialog, release tag
 - [ ] Optional: code-sign `.exe` (SmartScreen trust)
@@ -60,7 +60,7 @@ Use this list before publishing to GitHub, creating a release, or distributing t
 
 ## 6. Competitive positioning (critical review)
 
-| Feature | **SMD (yours)** | **SnapEasy** | **Snapy.io / online tools** | **Manual / ZIP only** |
+| Feature | **SMK (yours)** | **SnapEasy** | **Snapy.io / online tools** | **Manual / ZIP only** |
 |--------|-----------------|--------------|----------------------------|------------------------|
 | 2026 bundled multi-ZIP export | ✅ Native | ✅ | Varies | ❌ Manual extract |
 | Offline after export download | ✅ | ✅ | ❌ Upload to cloud | ✅ |
@@ -111,4 +111,4 @@ Use this list before publishing to GitHub, creating a release, or distributing t
 
 ---
 
-*Last updated: July 2026 — Las HS / SMD*
+*Last updated: July 2026 — Las HS / SMK*

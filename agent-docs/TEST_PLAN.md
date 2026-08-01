@@ -1,4 +1,4 @@
-# SMD Phase A Test Plan (Simple + Specific)
+# SMK Phase A Test Plan (Simple + Specific)
 
 Run this exactly in order.  
 Goal: prove the app is stable before Phase B.
@@ -169,7 +169,7 @@ After testing, save:
 
 This makes fixing remaining issues much faster.
 
-# SMD Phase A Test Plan (Windows 10/11)
+# SMK Phase A Test Plan (Windows 10/11)
 
 Use this checklist before Phase B. Goal: verify reliability and resume safety.
 

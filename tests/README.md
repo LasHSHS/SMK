@@ -1,6 +1,6 @@
 # Tests
 
-Small fixtures and local test run output for SMD development.
+Small fixtures and local test run output for SMK development.
 
 - `fixtures/` — JSON snippets and sample media (keep small)
 - `runs/` — disposable output from manual test runs

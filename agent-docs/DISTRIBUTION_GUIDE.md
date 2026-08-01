@@ -1,6 +1,6 @@
-# Distribution Guide — All-in-One SMD (Windows)
+# Distribution Guide — All-in-One SMK (Windows)
 
-SMD is distributed as **one self-contained package**. End users install or unzip once and run `smd.exe`. They never install Python, ffmpeg, pip, or other tools.
+SMK is distributed as **one self-contained package**. End users install or unzip once and run `SMK.exe`. They never install Python, ffmpeg, pip, or other tools.
 
 ## What is bundled
 
@@ -15,7 +15,7 @@ SMD is distributed as **one self-contained package**. End users install or unzip
 ## Build (release maintainer only)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_smd.ps1
+powershell -ExecutionPolicy Bypass -File .\build_smk.ps1
 ```
 
 This script:
@@ -23,13 +23,13 @@ This script:
 1. Creates/uses `.venv` (developers only — not shipped)
 2. Downloads ffmpeg into `tools/ffmpeg/` if missing
 3. Runs `pyinstaller smd.spec`
-4. Copies ffmpeg beside `dist/smd/smd.exe`
+4. Copies ffmpeg beside `dist/smd/SMK.exe`
 
 **Output:** `dist/smd/` — zip this folder or compile `smd_installer.iss` with Inno Setup.
 
 ## Release checklist
 
-- [ ] `dist/smd/smd.exe` launches without console window
+- [ ] `dist/smd/SMK.exe` launches without console window
 - [ ] About dialog shows ffmpeg: **Bundled**
 - [ ] Bundled export: merge + metadata on sample ZIP
 - [ ] GPS map tab loads (WebEngine)

@@ -1,18 +1,26 @@
 """Merge Snapchat -main and -overlay export files."""
 from __future__ import annotations
 
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from smd.ffmpeg_bundle import resolve_ffmpeg
 from smd.procutil import subprocess_flags as _subprocess_flags
 
 # Maximum practical quality for export outputs
 JPEG_QUALITY = 100
+
+# Scale overlay PNG to the main video frame, then composite.
+# Snapchat overlay PNGs almost never match video pixel size; bare overlay=0:0
+# crops the oversized overlay at native scale (zoomed captions).
+# Overlay input must be ``-loop 1`` so the still PNG lasts for the whole clip;
+# ``shortest=1`` then ends the output when the *video* ends. Without looping,
+# shortest stops after the PNG's single frame → a frozen "photo video".
+_VIDEO_OVERLAY_FILTER = (
+    "[1:v][0:v]scale2ref[ov][base];[base][ov]overlay=0:0:format=auto:shortest=1"
+)
 
 
 def merge_image_overlay(main_path: Path, overlay_path: Path, output_path: Path) -> bool:
@@ -22,8 +30,12 @@ def merge_image_overlay(main_path: Path, overlay_path: Path, output_path: Path) 
     from smd.fsutil import tmp_sibling
 
     try:
-        base = Image.open(main_path).convert("RGBA")
-        overlay = Image.open(overlay_path).convert("RGBA")
+        base_raw = Image.open(main_path)
+        base_raw = ImageOps.exif_transpose(base_raw) or base_raw
+        base = base_raw.convert("RGBA")
+        overlay_raw = Image.open(overlay_path)
+        overlay_raw = ImageOps.exif_transpose(overlay_raw) or overlay_raw
+        overlay = overlay_raw.convert("RGBA")
         if overlay.size != base.size:
             overlay = overlay.resize(base.size, Image.Resampling.LANCZOS)
         merged = Image.alpha_composite(base, overlay)
@@ -81,10 +93,12 @@ def merge_video_overlay(
             [
                 "-i",
                 str(main_path),
+                "-loop",
+                "1",
                 "-i",
                 str(overlay_path),
                 "-filter_complex",
-                "overlay=0:0",
+                _VIDEO_OVERLAY_FILTER,
                 *profile.args,
                 "-c:a",
                 "copy",

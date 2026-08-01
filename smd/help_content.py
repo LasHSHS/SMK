@@ -11,15 +11,84 @@ _BODY = (
     " code { font-family: Consolas, monospace; font-size: 13px; "
     "background: rgba(128,128,128,0.15); padding: 1px 5px; border-radius: 4px; }"
 )
+# Title spacing comes from headed_title (level 3 top margin). Keep a light
+# section separator only — Qt often collapses/ignores section margin-top.
 _SECTION = (
-    "margin: 32px 0 36px; padding: 0 0 28px; border-bottom: 1px solid rgba(128,128,128,0.35);"
+    "margin: 8px 0 8px; padding: 0 0 20px; border-bottom: 1px solid rgba(128,128,128,0.35);"
 )
-_H2 = "margin: 0 0 12px; font-size: 22px;"
-_H3 = "margin: 0 0 10px; font-size: 18px;"
+# Kept for any leftover call sites; prefer headed_title().
+_H2 = "margin: 0 0 12px; font-size: 22px; font-weight: 700;"
+_H3 = "margin: 0 0 10px; font-size: 18px; font-weight: 700;"
 _TOC = (
     "font-size: 15px; line-height: 2; margin: 16px 0 24px; padding: 14px 18px; "
     "background: rgba(128,128,128,0.1); border-radius: 10px;"
 )
+
+
+# Document image name for short title rules (see inject_title_rule_image).
+TITLE_RULE_IMAGE = "smk_title_rule.png"
+
+
+def _title_rule_width(text: str, size_px: int) -> int:
+    """Pixel width for the short bar — match title text like Save Memories."""
+    try:
+        from PyQt5.QtGui import QFont, QFontMetrics
+
+        from smd.theme import FONT_STACK_DISPLAY
+
+        font = QFont()
+        # QSS uses a CSS stack; pick the first family for measuring.
+        family = FONT_STACK_DISPLAY.split(",")[0].strip().strip('"').strip("'")
+        font.setFamily(family or "Segoe UI")
+        font.setPixelSize(size_px)
+        font.setWeight(QFont.DemiBold)
+        return max(24, QFontMetrics(font).horizontalAdvance(text))
+    except Exception:
+        return max(24, int(len(text) * size_px * 0.52))
+
+
+def headed_title(text: str, *, level: int = 2, accent: str | None = None) -> str:
+    """Title + short accent underline under the text (Save Memories style).
+
+    Uses a 2-row table so Qt cannot place the rule image inline after the
+    title (``<div>``+``<img>`` was rendering the bar at the end of the line).
+    Call :func:`inject_title_rule_image` after ``setHtml`` so the image exists.
+    """
+    # accent kept for API/theme sync; color comes from the injected image.
+    _ = accent
+    safe = html.escape(text)
+    size = 22 if level <= 2 else 18
+    # Main page title: no extra top gap. Section/step titles: ~one blank line.
+    margin_top = 0 if level <= 2 else 26
+    margin_bottom = 12 if level <= 2 else 10
+    rule_w = _title_rule_width(text, size)
+    # Two rows: title, then bar — same structure as QLabel + QFrame#sectionTitleRule.
+    return (
+        f'<table border="0" cellspacing="0" cellpadding="0" '
+        f'style="margin:{margin_top}px 0 {margin_bottom}px 0;">'
+        f'<tr><td style="font-size:{size}px; font-weight:700; '
+        f'line-height:1.2; padding:0;">{safe}</td></tr>'
+        f'<tr><td style="padding:4px 0 0 0; line-height:2px;">'
+        f'<img src="{TITLE_RULE_IMAGE}" width="{rule_w}" height="2" /></td></tr>'
+        f"</table>"
+    )
+
+
+def inject_title_rule_image(browser, accent: str) -> None:
+    """Install a solid accent bar image used by :func:`headed_title`."""
+    from PyQt5.QtCore import QUrl
+    from PyQt5.QtGui import QColor, QImage, QTextDocument
+
+    img = QImage(8, 2, QImage.Format_ARGB32)
+    img.fill(QColor(accent))
+    browser.document().addResource(
+        QTextDocument.ImageResource,
+        QUrl(TITLE_RULE_IMAGE),
+        img,
+    )
+    # Ensure the layout picks up the newly available image.
+    browser.document().markContentsDirty(0, max(1, browser.document().characterCount()))
+    browser.viewport().update()
 
 
 def _callout(kind: str, title: str, body: str) -> str:
@@ -125,14 +194,14 @@ def _compare_two(left_title: str, left_body: str, right_title: str, right_body: 
     )
 
 
-def build_help_html(process_tab_name: str = "Save memories") -> str:
+def build_help_html(process_tab_name: str = "Save memories", *, accent: str | None = None) -> str:
     p = html.escape(process_tab_name)
     parts = [
         "<div style='line-height:1.55;'>",
-        f"<h2 style='{_H2}'>Help</h2>",
+        headed_title('Help', level=2, accent=accent),
         f"<p style='{_BODY} margin-bottom:12px;'>"
         "Turn your Snapchat export into dated photos and videos on your PC - filters, GPS, and all. "
-        "Use the <b>Guide</b> tab for Snapchat steps; this page covers SMD itself.</p>",
+        "Use the <b>Guide</b> tab for Snapchat steps; this page covers SMK itself.</p>",
         f'<nav style="{_TOC}">'
         "<b>On this page</b><br>"
         '<a href="#start">1. Start here</a><br>'
@@ -143,12 +212,12 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
         '<a href="#fix">6. Troubleshooting</a>'
         "</nav>",
         f'<section id="start" style="{_SECTION}">',
-        f"<h3 style='{_H3}'>1. Start here</h3>",
+        headed_title('1. Start here', level=3, accent=accent),
         _flow_diagram(
             [
                 ("Guide tab", "Request export"),
                 ("Email", "Download all ZIPs"),
-                (process_tab_name, "Start full processing"),
+                (process_tab_name, "Start processing"),
                 ("Desktop folder", "Your library"),
             ]
         ),
@@ -169,8 +238,10 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
                 ),
                 (
                     "Enough disk space",
-                    "Plan for roughly <b>2-3× the ZIP size</b> during the run; you can free staging later "
-                    "(Technical view only).",
+                    "Plan about <b>ZIP size + ~5 GB</b> free (Windows headroom). "
+                    "Filters-only finish is usually near the ZIP size; "
+                    "<b>Also save without filters</b> needs about <b>2× ZIP + ~5 GB</b>. "
+                    "SMK warns before Start if space looks tight — you can still continue.",
                 ),
             ]
         ),
@@ -179,14 +250,28 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
             "New to Snapchat export?",
             "Open the <b>Guide</b> tab first - it has screenshots for requesting your data.",
         ),
+        _callout(
+            "info",
+            "Stopped, crashed, or closed mid-run?",
+            "<p>SMK saves progress as it goes. To continue:</p>"
+            "<ol>"
+            "<li>Open the same account (Existing account / same name).</li>"
+            "<li>Select the <b>same</b> Snapchat export folder (same ZIP parts).</li>"
+            "<li>Click <b>Start processing</b> again.</li>"
+            "</ol>"
+            "<p>Finished files are skipped; work resumes from what is left. "
+            "If the PC ran out of disk space, free space first, then Start again the same way.</p>"
+            "<p>Do <b>not</b> delete <code>technical/checkpoint/</code> or rename the account "
+            "folder if you want a clean resume.</p>",
+        ),
         "</section>",
         f'<section id="before" style="{_SECTION}">',
-        f"<h3 style='{_H3}'>2. Before export</h3>",
+        headed_title('2. Before export', level=3, accent=accent),
         _callout(
             "warn",
             "My Eyes Only is never included",
             "<p>Unlock <b>My Eyes Only</b> and move snaps into <b>Memories</b> "
-            "<b>before</b> you submit the data request. SMD cannot recover what Snapchat omitted.</p>"
+            "<b>before</b> you submit the data request. SMK cannot recover what Snapchat omitted.</p>"
             "<p>Snaps never saved to Memories (Camera Roll only, chats, expired stories) are excluded too.</p>",
         ),
         _compare_two(
@@ -214,7 +299,7 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
         ),
         "</section>",
         f'<section id="run" style="{_SECTION}">',
-        f"<h3 style='{_H3}'>3. Run processing</h3>",
+        headed_title('3. Run processing', level=3, accent=accent),
         f"<p style='{_BODY}'>On the <b>{p}</b> tab:</p>",
         _pipeline_ladder(
             [
@@ -224,17 +309,21 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
                 ),
                 (
                     "Choose performance + estimate",
-                    "<b>Maximum</b> / <b>Balanced</b> / <b>Eco</b>. Use <b>Estimate time</b> and "
-                    "<b>Recommended settings</b> before long runs.",
+                    "<b>Maximum</b> / <b>Balanced</b> / <b>Eco</b>. The estimate under Performance "
+                    "updates from your ZIP (file count, video/filter mix) — rough guide only; "
+                    "big libraries can take hours.",
                 ),
                 (
                     "Run block options",
-                    "Filters are always included. Optionally tick <b>Also save without filters</b> for plain copies. "
-                    "Tick <b>Technical view</b> only if you need staging, verify, or folder trees (see section 4).",
+                    "Filters are always included. Optionally tick <b>Also save without filters</b> for plain copies "
+                    "(uses about twice the disk). "
+                    "Tick <b>Technical view</b> only if you need logs, duplicate review, or run-info copies "
+                    "(see section 4).",
                 ),
                 (
-                    "Start full processing",
-                    "Extract → match JSON → merge overlays → embed metadata → summary popup.",
+                    "Start processing",
+                    "Extract → match JSON → merge overlays → embed metadata → summary popup. "
+                    "New account name? The folder is created then.",
                 ),
             ]
         ),
@@ -242,7 +331,7 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
         _pipeline_ladder(
             [
                 (
-                    "Checkpoint every 10 files",
+                    "Checkpoint every 25 files",
                     "Progress saved under technical storage so you can cancel and resume later.",
                 ),
                 (
@@ -260,63 +349,83 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
         _callout(
             "info",
             "Privacy",
-            "Bundled processing stays on your PC. SMD is not affiliated with Snap Inc.",
+            "Bundled processing stays on your PC. SMK is not affiliated with Snap Inc.",
         ),
         "</section>",
         f'<section id="folders" style="{_SECTION}">',
-        f"<h3 style='{_H3}'>4. Where files go</h3>",
+        headed_title('4. Where files go', level=3, accent=accent),
         f"<p style='{_BODY}'>Layout depends on <b>Technical view</b> on the Run card (off by default):</p>",
         _compare_two(
             "Simple (default)",
-            "<p><b>Your photos/videos:</b> <code>Desktop/&lt;project&gt;/</code></p>"
+            "<p><b>Your photos/videos:</b> <code>Desktop/&lt;name&gt;-memories/</code></p>"
             "<p>If <b>Also save without filters</b> is on:</p>"
             "<ul>"
-            "<li><code>Desktop/&lt;project&gt;/merged/</code> - with filters</li>"
-            "<li><code>Desktop/&lt;project&gt;/raw/</code> - plain copies</li>"
+            "<li><code>…/merged/</code> - with filters</li>"
+            "<li><code>…/raw/</code> - plain copies</li>"
             "</ul>"
-            "<p><b>Working data</b> (staging, JSON, checkpoints) lives in "
-            "<code>%LOCALAPPDATA%\\SnapchatMemoriesDownloader\\accounts\\&lt;project&gt;\\technical\\</code> "
-            "- hidden from normal browsing.</p>",
+            "<p><b>Working data</b> (staging, JSON, checkpoints) lives under "
+            "<code>%LOCALAPPDATA%\\SnapchatMemoriesDownloader\\accounts\\…\\technical\\</code> "
+            "- out of the way for normal browsing.</p>",
             "Technical view (advanced)",
-            "<p>Everything under <code>Desktop/SMD Media/accounts/&lt;project&gt;/</code>:</p>"
+            "<p>Account folder under your chosen base (default <code>Desktop/</code>): "
+            "<code>&lt;base&gt;/&lt;name&gt;-memories/</code></p>"
             "<ul>"
-            "<li><code>downloads/merged/</code> - finished library</li>"
-            "<li><code>downloads/raw/</code> - optional plain copies</li>"
-            "<li><code>technical/staging/</code> - huge temp extract</li>"
+            "<li>Photos/videos in that folder (or <code>merged/</code> + <code>raw/</code> "
+            "if Also save without filters)</li>"
+            "<li><code>technical/staging/</code> - large temp extract</li>"
             "<li><code>technical/reports/</code>, <code>checkpoint/</code>, <code>logs/</code></li>"
             "</ul>"
-            "<p>Enables <b>Verify staging</b>, <b>Open technical folder</b>, and storage size labels.</p>",
+            "<p>Enables <b>Keep duplicates for review</b>, <b>Review duplicates</b>, "
+            "<b>Add run info to finished folder</b> "
+            "(copies a small <code>SMK-run-info/</code> next to your memories), "
+            "<b>Open debug folder</b>, and storage size labels.</p>",
         ),
         _callout(
             "warn",
             "Disk space",
-            "<p><code>staging/</code> can match the uncompressed ZIP size. "
-            "Only delete it after <b>Verify staging</b> passes (Technical view).</p>"
-            "<p>If space runs out mid-run: free space, same project name, run again - checkpoint resumes.</p>",
+            "<p>Plan <b>ZIP size + ~5 GB</b> free for filters-only "
+            "(finished library is usually near the ZIP size; Windows needs headroom). "
+            "With <b>Also save without filters</b>, plan about <b>2× ZIP + ~5 GB</b>.</p>"
+            "<p>During a run, <code>staging/</code> is a temporary unpack about the ZIP size; "
+            "SMK removes it after a successful finish when safe.</p>"
+            "<p>If space runs out mid-run: free space, same account name, same export, "
+            "Start again — see <a href=\"#start\">Stopped mid-run</a> above.</p>",
+        ),
+        _callout(
+            "tip",
+            "ZIP folder looks twice as big as Snapchat’s cloud size?",
+            "<p>Folder Properties counts <b>everything</b> inside — including an "
+            "<code>extracted</code> unpack next to the ZIPs. Only the "
+            "<code>mydata~….zip</code> parts matter for SMK; their total should be "
+            "close to Snapchat’s Memories size. You can delete a leftover "
+            "<code>extracted</code> folder; SMK reads the ZIPs.</p>",
         ),
         "</section>",
         f'<section id="after" style="{_SECTION}">',
-        f"<h3 style='{_H3}'>5. After processing</h3>",
+        headed_title('5. After processing', level=3, accent=accent),
         _pipeline_ladder(
             [
                 ("Read the summary popup", "Check failed count and file totals."),
                 (
                     "Open finished folder",
-                    "Opens your library folder (Desktop project folder, or <code>downloads/merged/</code> in Technical view).",
+                    "Opens your library folder (<code>Desktop/&lt;name&gt;-memories/</code>, "
+                    "or the same under your Technical-view base folder).",
                 ),
                 (
                     "Spot-check a few files",
                     "Filters, dates, and GPS look correct in Properties or File Checker.",
                 ),
                 (
-                    "Review duplicates (optional)",
-                    "Scans for byte-identical files. Tick the copies to keep in each group "
-                    "(or Keep both); the ones you do not keep are permanently deleted. A JSON "
-                    "record of what was removed is saved in <code>technical/reports/</code>.",
+                    "Review duplicates (Technical view, optional)",
+                    "With <b>Keep duplicates for review</b> on, or to re-check later: "
+                    "tick the copies to keep in each group (or Keep both); the ones you "
+                    "do not keep are permanently deleted. A JSON record is saved in "
+                    "<code>technical/reports/</code>.",
                 ),
                 (
-                    "Verify staging + delete (Technical view)",
-                    "When verify passes, delete <code>technical/staging/</code> to reclaim space.",
+                    "Add run info (Technical view, optional)",
+                    "Copies a small <code>SMK-run-info/</code> folder next to your memories "
+                    "(JSON, reports, logs — not the large staging extract).",
                 ),
             ]
         ),
@@ -336,7 +445,7 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
         ),
         "</section>",
         f'<section id="fix" style="{_SECTION} border-bottom:none;">',
-        f"<h3 style='{_H3}'>6. Troubleshooting</h3>",
+        headed_title('6. Troubleshooting', level=3, accent=accent),
         _callout(
             "info",
             "Incomplete library / low file count",
@@ -362,8 +471,10 @@ def build_help_html(process_tab_name: str = "Save memories") -> str:
         _callout(
             "warn",
             "Out of disk space",
-            "<p>Free space on the drive holding your project, resume with the same name. "
-            "Then Verify staging → delete staging (Technical view).</p>",
+            "<p>Free space on the drive holding your project "
+            "(aim for ZIP + ~5 GB, or 2× ZIP + ~5 GB if saving without filters), "
+            "then resume with the same name. "
+            "After a clean finish, staging is removed automatically when safe.</p>",
         ),
         "</section>",
         "</div>",

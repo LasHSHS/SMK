@@ -46,7 +46,8 @@ def test_summary_html_with_duplicates_and_notes():
         notes=["1 item(s) failed."],
         safe_to_delete_staging=False,
     ).summary_html()
-    assert "Duplicate content groups" in html
+    assert "Identical-file duplicate groups" in html
+    assert "auto-removed" in html
     assert "run again with the same name" in html
     assert "Notes" in html
 
@@ -54,3 +55,31 @@ def test_summary_html_with_duplicates_and_notes():
 def test_summary_html_failure_state():
     html = _report(success=False, failed=2).summary_html()
     assert "Finished with issues" in html
+
+
+def test_summary_html_with_visual_duplicates():
+    html = _report(visual_duplicate_groups=5).summary_html()
+    assert "Same-content groups (different bytes)" in html
+    assert "oldest filename kept" in html
+
+
+def test_summary_html_memory_counts_section():
+    html = _report(
+        json_row_count=915,
+        media_found_in_zip=696,
+        staging_byte_dupes_removed=15,
+        staging_visual_dupes_removed=0,
+        json_matched=681,
+        library_kept=681,
+        this_run_processed=0,
+        skipped_already_complete=True,
+        merged_count=681,
+    ).summary_html()
+    assert "How many memories" in html
+    assert "915" in html
+    assert "Duplicates removed before saving" in html
+    assert "15" in html
+    assert "Your library now" in html
+    assert "This run processed" in html
+    assert "already complete" in html
+    assert "not always the same number as the JSON" in html

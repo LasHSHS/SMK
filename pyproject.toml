@@ -1,7 +1,7 @@
 [project]
 name = "smd"
 version = "1.0.0"
-description = "Snapchat Memories Downloader (SMD) - offline bundled export processor"
+description = "Snapchat Memories Keeper (SMK) - offline bundled export processor"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

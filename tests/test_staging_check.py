@@ -15,8 +15,10 @@ FAKE_MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 1016
 
 
 def _setup_complete_account(tmp: Path) -> AccountPaths:
-    paths = AccountPaths.for_account(tmp / "Las")
-    paths.ensure_dirs()
+    # keep_raw=True: this scenario needs both merged/ and raw/ outputs to
+    # exist side by side, which only the nested layout provides.
+    paths = AccountPaths.for_account(tmp / "Las", keep_raw=True)
+    paths.ensure_dirs(keep_raw=True)
 
     stem = "2020-12-14_0610d8a6-fbce-c5c9-35c2-550484a732a0"
     main_name = f"{stem}-main.mp4"

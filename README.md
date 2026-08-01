@@ -1,4 +1,4 @@
-# Snapchat Memories Downloader (SMD)
+# Snapchat Memories Keeper (SMK)
 
 Process Snapchat Memories exports locally on your PC: extract bundled media, merge overlays, embed capture metadata (time + GPS where available), and browse results on a map.
 
@@ -20,20 +20,21 @@ Process Snapchat Memories exports locally on your PC: extract bundled media, mer
 - This app processes files **locally on your machine** - no uploads, no telemetry.
 - **Offline-first:** memory processing needs no internet. The optional GPS map may load map tiles when you open File Checker.
 - **Bundled exports only:** link-only exports (JSON with download URLs but no media in the ZIP) are not supported.
+- Same-day **photos** are paired to JSON using **ZIP entry timestamps** Snapchat leaves on the files (videos use each file’s embedded capture time). Prefer processing from the original export ZIPs — copying/extracting in a way that resets file times can fall back to weaker ordering.
 - Snapchat `My Eyes Only` content is not included in normal Memories export flow. Move content into Memories first if you need it included.
 
 ## Platform Support
 
 - Official target for v1: **Windows 10/11 (64-bit)** — this is the only platform built, tested, and supported by the maintainer.
 - The Python/PyQt5 source is cross-platform in principle, but there is no macOS, Linux, Android, or iOS build, and none is currently planned by the maintainer (no hardware to build or test on).
-- **Contributions welcome:** if you'd like to port SMD to macOS, Linux, Android, or iOS, PRs are very welcome. Please open an issue first to discuss packaging/signing approach for that platform before submitting a large PR.
+- **Contributions welcome:** if you'd like to port SMK to macOS, Linux, Android, or iOS, PRs are very welcome. Please open an issue first to discuss packaging/signing approach for that platform before submitting a large PR.
 
 ## Quick Start (User)
 
 **Official release — no extra software needed**
 
-1. Download and run the SMD installer (or unzip the portable `smd` folder).
-2. Open **Snapchat Memories Downloader**.
+1. Download and run the SMK installer (or unzip the portable folder).
+2. Open **Snapchat Memories Keeper** (`SMK.exe`).
 3. Request your Snapchat data export (Memories + JSON).
 4. Select the export ZIP (or folder with all ZIP parts).
 5. Click Start — processing runs locally on your PC.
@@ -47,10 +48,10 @@ See **`agent-docs/ALL_IN_ONE_PACKAGING.md`** for the canonical packaging rules (
 See **`agent-docs/DISTRIBUTION_GUIDE.md`** for the release checklist.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_smd.ps1
+powershell -ExecutionPolicy Bypass -File .\build_smk.ps1
 ```
 
-Output: `dist/smd/smd.exe` (all-in-one portable folder).
+Output: `dist/smd/SMK.exe` (all-in-one portable folder; package dir name stays `smd`).
 
 ## Architecture
 

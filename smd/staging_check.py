@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -170,6 +171,7 @@ def check_staging_readiness(
     layout: AccountPaths | None = None,
     deep_video_check: bool = True,
     video_check_limit: int | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> StagingReadinessReport:
     """
     Verify every staged memory has finished outputs before deleting staging/.
@@ -186,6 +188,16 @@ def check_staging_readiness(
         checked_at=datetime.now(timezone.utc).isoformat(),
         safe_to_delete=False,
     )
+
+    def progress(current: int, total: int) -> None:
+        if progress_callback:
+            try:
+                progress_callback(current, total)
+            except Exception:
+                pass
+
+    # Stage-6 bar: setup ~0-20%, output checks ~20-40%, deep video ~40-100%.
+    progress(0, 100)
 
     if not paths.staging_dir.is_dir() or not any(paths.staging_dir.iterdir()):
         issues.append(
@@ -249,8 +261,11 @@ def check_staging_readiness(
 
     done_stems: set[str] = set()
     skipped_stems: set[str] = set()
+    output_by_stem: dict[str, str] = {}
     if paths.checkpoint_path.is_file():
-        done_stems, skipped_stems, _ = _load_checkpoint(paths.checkpoint_path)
+        done_stems, skipped_stems, _, output_by_stem = _load_checkpoint(
+            paths.checkpoint_path
+        )
         report.checkpoint_done = len(done_stems)
         report.checkpoint_skipped = len(skipped_stems)
     else:
@@ -278,6 +293,7 @@ def check_staging_readiness(
         )
 
     removed_by_dup_review = _load_duplicate_removed_filenames(paths.reports_dir)
+    progress(20, 100)
 
     missing_merged: list[str] = []
     missing_raw: list[str] = []
@@ -287,16 +303,24 @@ def check_staging_readiness(
     for stem in main_stems:
         item = items[stem]
         planned = output_names.get(stem)
+        recorded = output_by_stem.get(stem)
         if not planned:
             ext = item.main_ext or (item.main_path.suffix.lower() if item.main_path else ".mp4")
             planned = f"{item.date_prefix}_{item.uid[:8]}{ext}"
+        # Prefer the filename written when the stem was marked done (survives
+        # match-map drift after resume). Fall back to current planned name.
+        check_name = recorded or planned
 
         ext = item.main_ext or (item.main_path.suffix.lower() if item.main_path else ".mp4")
-        was_removed_as_duplicate = planned in removed_by_dup_review or (
-            _resolve_output_filename(planned, ext) in removed_by_dup_review
-        )
+        was_removed_as_duplicate = check_name in removed_by_dup_review or (
+            _resolve_output_filename(check_name, ext) in removed_by_dup_review
+        ) or planned in removed_by_dup_review
 
-        merged_status = _stem_output_status(item, planned, paths.merged_dir)
+        merged_status = _stem_output_status(item, check_name, paths.merged_dir)
+        if merged_status != "ok" and planned != check_name:
+            merged_status = _stem_output_status(item, planned, paths.merged_dir)
+            if merged_status == "ok":
+                check_name = planned
         if merged_status == "ok":
             report.outputs_verified += 1
         elif was_removed_as_duplicate:
@@ -308,7 +332,9 @@ def check_staging_readiness(
             missing_merged.append(stem)
 
         if require_raw and not was_removed_as_duplicate:
-            raw_status = _stem_output_status(item, planned, paths.raw_dir)
+            raw_status = _stem_output_status(item, check_name, paths.raw_dir)
+            if raw_status != "ok" and planned != check_name:
+                raw_status = _stem_output_status(item, planned, paths.raw_dir)
             if raw_status == "too_small":
                 undersized_raw.append(stem)
             elif raw_status != "ok":
@@ -425,6 +451,7 @@ def check_staging_readiness(
             )
         )
 
+    progress(40, 100)
     corrupt_merged: list[str] = []
     video_paths: list[Path] = []
     if paths.merged_dir.is_dir():
@@ -476,6 +503,8 @@ def check_staging_readiness(
 
         bad_videos = []
         max_workers = min(8, max(2, _os.cpu_count() or 4))
+        sample_total = max(1, len(sample))
+        checked = 0
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(ffprobe_stream_ok, vp): vp for vp in sample}
             for fut in as_completed(futures):
@@ -486,6 +515,10 @@ def check_staging_readiness(
                     verdict = None
                 if verdict is False:
                     bad_videos.append(vp.name)
+                checked += 1
+                # Map deep video check into the remaining 40% → 100% of stage 6.
+                if checked == 1 or checked == sample_total or checked % 10 == 0:
+                    progress(40 + int(checked / sample_total * 60), 100)
 
         if bad_videos:
             scope = "all" if sample is video_paths else f"{len(sample)} sampled"
@@ -502,6 +535,7 @@ def check_staging_readiness(
                 )
             )
 
+    progress(100, 100)
     has_errors = any(i.severity == "error" for i in issues)
     report.issues = issues
     report.safe_to_delete = (

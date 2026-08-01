@@ -1,11 +1,11 @@
-SMD - Snapchat Memories Downloader
+SMK - Snapchat Memories Keeper
 Copyright (C) 2026 Las HS (https://las-hs.com)
 
 This program is free software: you can redistribute it and/or modify it
 under the terms of the GNU General Public License version 3 as published
 by the Free Software Foundation. See the LICENSE file for the full text.
 
-SMD is not affiliated with, endorsed by, or sponsored by Snap Inc.
+SMK is not affiliated with, endorsed by, or sponsored by Snap Inc.
 "Snapchat" is a trademark of Snap Inc.
 
 --------------------------------------------------------------------------
@@ -18,7 +18,7 @@ attribution and license compliance.
 
 FFmpeg / ffprobe
   Website: https://ffmpeg.org
-  License: LGPL v2.1+ (some builds GPL). The official SMD build bundles
+  License: LGPL v2.1+ (some builds GPL). The official SMK build bundles
   FFmpeg binaries fetched at build time (see scripts/fetch_ffmpeg.ps1).
   FFmpeg is a trademark of Fabrice Bellard. Source for the exact FFmpeg
   build used is available from the FFmpeg project.

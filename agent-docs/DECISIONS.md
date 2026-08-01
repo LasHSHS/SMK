@@ -1,4 +1,4 @@
-# SMD Decision Log (for AI agents)
+# SMK Decision Log (for AI agents)
 
 Append-only log of **why** non-obvious choices were made. Rationale usually
 survives even when the exact implementation changes, so this should stay
@@ -11,6 +11,852 @@ relevant file/function instead of pasting code.
 
 ---
 
+### 2026-08-01 - Doc title underlines via document image resource
+
+**What**: `headed_title` uses a 2-row table (title, then 2px
+`<img src="smk_title_rule.png">`); `inject_title_rule_image` fills that
+image after every `setHtml`. Width from `QFontMetrics` like Save Memories.
+Level-3 titles keep ~26px top margin.
+
+**Why**: CSS/table backgrounds are unreliable in `FlowDocBrowser`. A bare
+`<div>`+`<img>` put the bar inline after the title. Two table rows match
+`QLabel` + `QFrame#sectionTitleRule`.
+
+### 2026-08-01 - Doc/section title underlines via tables and QFrame
+
+**What**: Guide/Help/About/Palestine titles use `headed_title()` (1-column
+table + 2px colored row). Save Memories box titles use
+`QFrame#sectionTitleRule` sized to the label text. Theme sync rebuilds all
+doc browsers with `palette(dark)["secondary"]`.
+
+**Why**: Qt QTextBrowser ignores CSS `border-bottom` / `display:inline-block`
+on headings; QLabel borders under styled frames are flaky on Windows. Earlier
+CSS-only underlines never appeared for the user.
+
+### 2026-08-01 - Trim After processing; pair duplicate wording
+
+**What**: Removed **Open technical folder** and **Verify staging** buttons.
+Renamed checkbox/button to **Keep duplicates for review** /
+**Review duplicates**. Staging cleanup stays automatic after a clean finish;
+technical logistics for curious users = **Add run info to finished folder**.
+
+**Why**: Open technical was only needed when someone wants logistics beside
+photos (Add run info). Manual Verify staging duplicated the end-of-run path.
+Matching “duplicates” wording makes the checkbox and button read as one flow.
+
+### 2026-08-01 - Title rules hug text; combo chevron; no red on buttons; full-height tabs
+
+**What**: Section title underline only as wide as the title. Performance
+combo gets a chevron + themed list view (fixes white popup bars). Technical
+view no longer paints QPushButtons red (normal gold/orange; disabled =
+flat dashed muted). File
+Checker restored to full-height splitter; Help/About/Palestine fill height
+again (`WidthAwareColumn(fill_height=True)`).
+
+**Why**: Full-width gold rules were too heavy; red-on-yellow buttons looked
+broken; WidthAwareColumn AlignTop crushed File Checker / doc tab height.
+
+### 2026-08-01 - Layout pass: nested margins, section height, File Checker column
+
+**What**: Zeroed default Qt margins on nested Account/My Data/After/Progress
+rows; `_section` vertical Preferred (removed My Data/Performance stretches);
+`WidthAwareColumn` top-aligns short content; File Checker uses the same
+centered column + `SECTION_PADDING` as Save Memories; live dashboard title
+uses real `sectionHeader` class.
+
+**Why**: Same indent/gap class of bugs as Run; File Checker sat ~28px further
+left than other tabs; Help/Guide floated vertically in tall windows.
+
+### 2026-08-01 - Gold title rules; Run layout; My Data wording; tech label in Run
+
+**What**: Section titles get a 2px underline via theme **secondary**
+(`sectionTitleRule` / doc `h2`/`h3`): orange in light, gold in dark.
+Run options use zero nested margins + Preferred height. Zip section
+renamed **My Data – zip files**. Technical storage label moved into Run.
+
+**Why**: Titles were hard to parse as box headers; Run’s nested layouts
+added default Qt margins/stretch; Technical toggling was shifting the zip
+section (“lag”). Cursive rejected — hurts grandma readability.
+
+### 2026-08-01 - Add run info as Technical-view checkbox; dashboard toggle on status row
+
+**What**: Restored run-info as **Add run info to finished folder** checkbox
+(under Technical view, above Keep duplicates). When on, end-of-run calls
+`copy_run_info_into_library()` → `SMK-run-info/`. Progress: **Show live run
+dashboard** sits on the right of the status/mode/ETA block (no extra row).
+
+**Why**: Checkbox matches the other Run options; packing the dashboard toggle
+saves vertical space without shrinking type.
+
+### 2026-08-01 - Product rename: Snapchat Memories Keeper (SMK)
+
+**What**: User-facing name is **Snapchat Memories Keeper** / **SMK**
+(was Snapchat Memories Downloader / SMD). Window title, splash, About,
+installer, `SMK.exe`, Desktop `SMKTester.bat`, video `\xa9swr` tag, and docs updated.
+`smd/branding.py` holds constants. AppData dirname, QSettings org/app, and
+Python package `smd/` stay legacy so installs keep accounts/prefs.
+Single-instance focus accepts both old and new window titles.
+
+**Why**: “Keeper” matches own-your-data / offline preservation positioning;
+short code SMK replaces SMD everywhere users see it.
+
+### 2026-08-01 - File Checker light theme defaults to Terrain
+
+**What**: `_create_themed_map(dark=False)` selects Terrain (OpenTopoMap) as
+the only `show=True` base layer; dark still uses CartoDB Dark Matter.
+`_apply_current_theme` calls `refresh_map_for_theme()` so toggling Light/Dark
+rebuilds the open map (pan/zoom resets; skipped while a check is running).
+
+**Why**: Light mode should read as Terrain, not OSM/Dark Matter leftover from
+the previous theme. Folium LayerControl cannot switch tiles without a rebuild.
+
+### 2026-08-01 - File Checker summary must use library-check HTML (not old ==== dump)
+
+**What**: `_apply_scan_report` always `setHtml`s
+`build_library_check_report` (date range, TOP PLACES, full PHOTO SIZES,
+embedded vs JSON GPS, short rules, few/no emojis). Verbose ScanWorker
+extension logs stay suppressed. Old MEDIA STATISTICS / GPS METADATA
+`====` append path removed.
+
+**Why**: Report builder existed but the tab still painted the legacy dump,
+so Check folder never showed the agreed summary.
+
+### 2026-08-01 - File Checker: quiet mid-scan status; no per-account shortcuts
+
+**What**: During Check folder, status text updates only on step changes and
+25% buckets (`_set_check_status_quiet`); no spinner animation. Progress bar
+and Cancel stay live. Rejected: “Check merged/raw” buttons and remembering
+the last checked folder (confusing across accounts).
+
+**Why**: Per-file ETA/spinner rewrites felt flickery; folder shortcuts would
+point at the wrong account’s tree.
+
+### 2026-08-01 - Remove Create; Start processing creates the folder
+
+**What**: Dropped the New-account **Create** button. Typed name + **Start
+processing** creates/activates the folder. Button label shortened from
+“Start full processing”.
+
+**Why**: Create was a redundant step that also cleared the name field;
+Start already created the folder.
+
+### 2026-08-01 - Layout resize: one owner, skip no-ops
+
+**What**: Dropped per-`WidthAwareColumn` resize timer; window debounced
+refresh owns width updates. Skip `setMin/MaxWidth` and doc `setTextWidth`
+when values are unchanged. Tab-switch still force-syncs docs.
+
+**Why**: Runtime logs showed window+column double-apply (~half of applies
+no-ops) and ~1.3ms redundant doc syncs during drag.
+
+### 2026-08-01 - Hard-cap context width to tab viewport
+
+**What**: `WidthAwareColumn` sizes against the scroll viewport (visible) or
+`mainTabs` width minus border+pane padding (hidden tabs). Content
+`minWidth == maxWidth == min(cap, available)` so the context column never
+outgrows the tab box or eats the ~12px inset
+(`TAB_PANE_PADDING` 4 + `TAB_CONTENT_MARGIN_H` 8).
+
+**Why**: Using raw `mainTabs.width()` overstated space; the context box
+grew to the pane edges even after the tight-margin tweak.
+
+### 2026-08-01 - Tight tab→content inset; no forced H-scroll
+
+**What**: Tab pane padding 8→4px; content-column margins 28→8px
+(`TAB_CONTENT_MARGIN_H`). `WidthAwareColumn` never forces min width above
+available space. Resize still refreshes all tabs (debounced).
+
+**Why**: Pane 8 + column 28 = 36px gap tab-box→context-box; with
+`CONTENT_MIN_FORM` that forced horizontal scroll at half of a 2K window.
+
+### 2026-08-01 - Resize all tabs; narrower columns; debounce layout
+
+**What**: Window resize refreshes every `WidthAwareColumn` (not only the
+active tab), debounced ~32ms. `FlowDocBrowser` height sync debounced.
+Content column caps 1270→1230 and form min 720→680.
+
+**Why**: Hidden `QStackedWidget` pages skip resizeEvents, so inactive tabs
+stayed at the old width until switched. Per-pixel layout during drag felt
+laggy.
+
+### 2026-08-01 - Live run panel emojis; avoid “dashboard” label
+
+**What**: Live run cards/title use light emoji labels. Checkbox text is
+**Show live run panel** (not “dashboard”).
+
+**Why**: Segoe UI Variable on Windows mis-kerns “oa”, so “dashboard”
+showed overlapping o/a. Renaming avoids the font bug without a custom font.
+
+### 2026-08-01 - Faster Dark/Light theme toggle
+
+**What**: Theme apply freezes widget updates, skips mid-switch `repaint()`,
+defers doc HTML rebuild to the next event-loop tick (visible window only),
+rebuilds the active tab’s doc browser first, and caches About `gather_about_facts`
+so ffmpeg `-version` is not re-run on every toggle.
+
+**Why**: Toggle felt sticky because four `setHtml` passes (Guide with images)
+plus About’s tool probes ran synchronously on the UI thread.
+
+### 2026-08-01 - Disk warn = copies×ZIP + 5 GB; ETA uses real ZIP GB
+
+**What**: Soft disk warn when free &lt; `(1 or 2)× ZIP + 5 GB` — 1× filters-only,
+2× if “Also save without filters”, plus **5 GB** OS headroom. ETA extract
+uses real ZIP part total (Las **~49 GB**, not a folder that also held
+`extracted/`). Merge/dup still file-count based (Las Maximum **3 h 33 min**,
+Mary **~7 min**).
+
+**Why**: Snapchat cloud (~50.6 GB) matched Las ZIP parts; the “~91 GB”
+folder was ZIP + a leftover unpack. Filters-only finish ≈ ZIP; keep_raw
+finish ≈ 2× ZIP (Mary/Las). Pure ZIP+5 under-warned keep_raw finals;
+blind 2× ZIP scared filters-only users. 5 GB OS headroom stays.
+
+### 2026-08-01 - Soft disk-space warning (ZIP + 5 GB; mention keep_raw)
+
+**What**: First pass used ZIP + ~5 GB for all runs (superseded above for
+keep_raw scaling).
+
+**Why**: Blind 2× ZIP was too scary before we separated ZIP-only vs
+ZIP+extracted folder sizes.
+
+### 2026-08-01 - Flat account folders (no Memories parent / nested wrapper)
+
+**What**: Technical layout stores media in `<base>/<account>/` (not
+`<account>/Memories/`). Default base is Desktop. On load, accounts under
+`Desktop/Memories` or `Desktop/SMD Media` move up to Desktop.
+`account_identity.json` keeps `account_name` + `mydata_ids` + layout; drops
+`username`/`display_name`.
+
+**Why**: Users expected sibling folders `Las-memories` / `Mary-memories`, not
+a parent Memories bag; null username fields were useless noise.
+
+### 2026-08-01 - Finishing overlay as failsafe; Technical contents dialog
+
+**What**: Keep centered “Almost done…” shield from verify through finalize
+until the summary dialog (progress bar still updates). Performance combo
+wording stresses CPU / multitasking, not battery. Duplicate logs say
+“Removing duplicate staged copies…”. Technical view gets a hint + **What’s
+in technical?** dialog listing staging/json/reports/checkpoint/logs/
+quarantine/debug/account_identity/README. Early+late duplicate scans stay
+(early saves encode time; late catches post-merge twins).
+
+**Technical folder keep/drop (reassess)**: Keep `json`, `reports`,
+`checkpoint`, `logs`, `quarantine`, `account_identity.json`, `README`.
+`staging` stays temporary (auto-delete after clean verify). `debug` rarely
+used but cheap empty folder — keep for failure dumps. Do not drop
+`account_identity` (layout/mydata bookkeeping; without it After-processing
+resolves wrong folders).
+
+**Layout note (not migrated yet)**: Prefer one account folder per person
+(`Las-memories` / `Mary-memories`) under Desktop or a chosen base — avoid an
+extra parent `Memories/` that holds multiple accounts. Nested
+`account/Memories/` in technical mode is separate; unify later if desired.
+
+**Why**: Silent end-of-run stall confused users; “use all power” read as
+battery; Technical view looked like “mystery settings”; early/late dedupe is
+intentional quality, not redundancy.
+
+### 2026-07-31 - Optional “Keep duplicates for my review” (Technical view)
+
+**What**: Technical-only checkbox; when on, `auto_delete_duplicates=False`
+skips staging auto-dedupe and post-run `auto_delete_duplicate_extras`. Scans
+still run; groups are left for **Check leftovers**. Off (default) = current
+auto-remove behavior. Ignored when Technical view is off.
+
+**Why**: Some users want to choose keepers themselves; burying the opt-out
+under Technical view keeps the default safe/simple.
+
+### 2026-07-31 - Map marker click uses embedded paths (not lat/lng lookup)
+
+**What**: Each folium Marker carries `smdPaths` (JSON list). Click JS reads
+`marker.options.smdPaths` and cycles if several files share a pin. Removed
+nearest-neighbor lat/lng fallback that opened the wrong neighbor after
+MarkerCluster spiderfy. MapRenderWorker supports Cancel; MapWorker cancel no
+longer also emits `finished` (that restarted marker rendering).
+
+**Why**: Same-GPS photo+video pins looked clickable as video but opened the
+neighbor photo when the cluster moved the pin. Cancel during “Adding markers”
+looked ignored for the same reason.
+
+### 2026-07-31 - Duplicate review demoted to Technical “Check leftovers”
+
+**What**: After-processing button renamed to **Check leftovers** and shown only
+when Technical view is on (`_technical_widgets`). Pipeline still auto-removes
+duplicates on Start.
+
+**Why**: Average users already get cleanup during processing; a always-visible
+“Review duplicates” button implied a required second step and scared people.
+Capability kept for rare leftovers / power users.
+
+### 2026-07-31 - Cancel mid-pipeline; skip work when library already complete
+
+**What**: `should_stop` is polled during ZIP extract, staging dedupe, and late
+duplicate scans (`PipelineCancelled` / `DuplicateScanCancelled`). When
+checkpoint outputs exist and every ZIP main stem is accounted for
+(done/skipped + prior staging-dedupe reports), skip extract/encode. Staging
+visual dedupe uses `duplicates_staging_visual_hash_cache.json`. Session
+counts distinguish this-run processed vs library size.
+
+**Why**: After staging auto-delete, a second Start on a finished account
+re-extracted ZIPs and re-ran minutes of visual staging hashing, then
+processed nothing — Cancel also did nothing until the encode loop. Honest
+counts fix “library kept 0” on no-op resumes.
+
+### 2026-07-31 - File Checker summary: no phone guesses from resolution
+
+**What**: Library check report lists every photo WxH with counts and only soft
+labels (`common Snapchat export size`, `tall phone portrait`). Never names
+iPhone/Samsung/etc. Dates and no-GPS-by-year come from filename stems.
+
+**Why**: Snapchat strips Make/Model; sizes like 1008x1792 are Snapchat crops,
+not native screens. Brand guesses would be wrong often and undermine the
+tab's "sleep well before upload" trust. See `smd/resolution_notes.py` and
+`smd/file_checker_report.py`.
+
+### 2026-07-31 - Summary shows JSON vs ZIP vs library counts (duplicates explained)
+
+**What**: Session summary "How many memories" lists Snapchat JSON row count,
+ZIP media before dedupe, staging duplicates removed (byte + visual), and
+final library size. Does **not** claim library always equals JSON count.
+
+**Why**: Users often expect 1:1 with `memories_history.json`. In practice JSON
+can list more rows than unique files in the ZIP (missing parts, or a twin
+UID removed as a duplicate after the user saved the same Memory twice).
+Early staging dedupe is the real cleanup; the post-encode duplicate pass is
+a safety net (often finds nothing after early cleanup).
+
+### 2026-07-31 - Checkpoint stores output filename (survive match drift on resume)
+
+**What**: `local_checkpoint.json` now includes `output_by_stem` (stem →
+filename actually written). Resume reconcile and staging verify prefer that
+name; if rematch wants a new name and the old file still exists, rename it
+instead of calling the stem "missing." Prune will not delete recorded names.
+
+**Why**: Las hit "1 missing" after multi-resume / power-off runs: one staging
+stem was unmatched on a later rematch (`…_a1ddf9b9.mp4` plan) while its real
+output still lived under an earlier date name. Checkpoint only stored stems,
+so verify looked for the wrong filename. Not caused by Review-delete order.
+
+### 2026-07-31 - Auto-remove duplicates (keep oldest); staging dedupe before process
+
+**What**: Byte-identical and same-content (visual) duplicates are no longer
+review-only. After each scan, `auto_delete_duplicate_extras()` permanently
+deletes extras from `merged/` (+ `raw/` when enabled), keeping
+`keeper_filename()` (oldest `YYYY-MM-DD_HH-MM-SS…`, then shortest name).
+Before match/encode, `dedupe_staging_items()` drops duplicate staging mains
+(and their overlays) the same way so GPU time is not spent on copies.
+
+**Why**: Exact SHA / decoded-content hashes mean false "different memory"
+flags are negligible in practice; the real choice was always which copy to
+keep. Oldest name prefers the original capture over a later Snapchat
+re-export. JSON matching is per-UID/stem - removing one duplicate never
+rewrites another file's GPS/date.
+
+### 2026-07-30 - Always delete staging after clean verify (no keep-staging option)
+
+**What**: Removed the Technical-view "Keep staging media files" checkbox and
+the post-run skip path. Every successful run always runs
+`StagingVerifyWorker`; if `safe_to_delete`, `CompletionFinalizeWorker`
+deletes `technical/staging/` automatically.
+
+**Why**: Staging is only the unpacked ZIP. On Las (~14k memories / ~4h),
+reuse saved ~2 minutes of extract — not ~20–50%. The option mainly left
+tens of GB on disk and skipped the integrity check users actually need.
+Manual "Verify staging" remains for Technical view.
+
+### 2026-07-30 - New account mode never keeps the previous folder active
+
+**What**: Switching to New account clears `_active_account_name`. While New
+is selected, a typed name (`_pending_new_account_name`) is what
+`_account_name()` returns. Start auto-creates that folder before the run
+(`start_download` → `_set_active_account(..., create=True)`).
+
+**Why**: Users could type "Mary", leave Las still active (forgot Create),
+and Start wrote Las's export into `Las-memories` with no `Mary-memories`
+folder created.
+
+### 2026-07-29 - Always-visible run stages; never say "done" during post-run tidy
+
+**What**: `process_bundled_export` emits `__SMD_STAGE__|n|6|title` markers
+(`SMD_STAGE_MARKER` in `smd/local_pipeline.py`). `LocalExportWorker.stage`
+forwards them; Progress shows stage title + Prepare/Extract/Match/Save/
+Duplicates/Finish overview **regardless of the live run dashboard toggle**.
+The existing `QProgressBar` is kept and **resets to 0% each stage**, then
+fills to 100% for that stage (`__SMD_PROGRESS__` + existing X/Y status
+lines). Never use an indeterminate bar. Stage 6 ("Finishing last touches")
+is GUI-owned: `on_download_finished` no longer says "completed successfully"
+or plays the happy tone — that waits until
+`CompletionMixin._on_completion_finalize_finished` after verify/summary.
+
+**Why**: Long Mary/Las runs left the bar stuck or at 100% while extract,
+duplicate scan, or post-run verify still ran; users thought SMK was frozen.
+Dashboard-only phase text was invisible when the toggle was off.
+
+### 2026-07-29 - Mixin showEvent + QMainWindow-first MRO crashed startup (0xC0000409)
+
+**What**: Removed `WindowChromeMixin.showEvent`. Reordered `DownloaderGUI`
+bases so mixins come **before** `QMainWindow`.
+
+**Why**: With `QMainWindow` first, sip still hooked a mixin `showEvent` that
+called `super().showEvent()`; that re-entered the wrapper, overflowed the
+stack, and aborted at `show()`/`showNormal()` with `0xC0000409` ("Unhandled
+Python exception"). Taskbar identity stays on AppUserModelID + Qt window
+flags; do not add Win32 `GetWindowLong*` style hacks in `showEvent` without
+re-testing show on 64-bit Windows.
+
+### 2026-07-29 - Console launch must tee stdout, not replace it
+
+**What**: `StreamRedirector` accepts `also=` (original console stream).
+`DownloaderGUI` tees into the debug panel instead of assigning a redirector
+that fully replaces console stdout/stderr.
+
+**Why**: After `Run-SMK.bat` switched to foreground `python.exe`, assigning
+`sys.stdout = StreamRedirector(...)` aborted with Windows `0xC0000409`
+during main-window init ("Unhandled Python exception"). Teeing keeps the
+bat console alive and the GUI log fed.
+
+### 2026-07-29 - Run-SMK.bat owns the GUI process (close console = close SMK)
+
+**What**: `Run-SMK.bat` runs `.venv\Scripts\python.exe desktop_gui_pyqt.py`
+in the foreground (no `start` + `pythonw`). Closing the bat console closes
+that SMK only. Main window `closeEvent` cancels workers and `app.quit()`;
+`setQuitOnLastWindowClosed(True)`.
+
+**Why**: Detached `pythonw` left orphan Task Manager entries after users
+closed the launcher window, so they had to End Task by hand. Foreground
+`python.exe` ties lifetime to that console without `taskkill` of unrelated
+Python processes (e.g. Cursor).
+
+### 2026-07-29 - Overlay video encode nudged sharper (still far from lossless bloat)
+
+**What**: `gpu_encode.py` quality knobs moved: x264 CRF 16→14, AMD AMF
+QP 22→18, NVENC/QSV 18→16.
+
+**Why**: User wants caption videos closer to `raw/` look without returning to
+CRF 0 / QP 0, which made `merged/` absurdly larger than Snapchat originals
+(whole-frame lossless re-encode after burn-in). There is no way to keep the
+original video bitstream and only compress the overlay in one file; this is
+the available lever. Modest step only - expect somewhat larger overlay
+`merged/` videos and a bit more encode time, not the old multi‑× blow-up.
+
+### 2026-07-29 - Second launch focuses existing window; never kill a live run
+
+**What**: If `SingleInstance` finds a live owner, the second process writes the
+show-signal, focuses any "Snapchat Memories Keeper*" HWND, and **exits**.
+`force_takeover()` only runs when the lock owner is gone. Taskbar: force
+`WS_EX_APPWINDOW` / clear `WS_EX_TOOLWINDOW` on show + flash on re-focus;
+set `QApplication` window icon.
+
+**Why**: Old path waited 1.5s then killed the prior instance if the signal
+file lingered - during a long processing run the UI can be busy, so that
+could destroy a multi-hour job. User also lost the taskbar button on a
+second monitor and thought SMK had been closed. Discord/Spotify behavior:
+one instance; second launch only brings it forward.
+
+### 2026-07-29 - Loop still overlay PNGs when burning into video (fix 1-frame "photo videos")
+
+**What**: `merge_video_overlay()` passes `-loop 1` on the overlay PNG input
+before `scale2ref` + `overlay=...:shortest=1`.
+
+**Why**: With scale2ref we added `shortest=1` so output length follows the
+video. A non-looped PNG is one frame, so shortest ended the encode after
+frame 1 - metadata duration stayed ~full length but `nb_frames=1` (frozen
+still, tiny file). Confirmed on Las merged vs raw for 2025-01-03 /
+2025-02-08 / 2024-10-20 overlay clips. Photos were fine (Pillow composite,
+JPEG q=100); this bug was video-overlay only.
+
+### 2026-07-29 - Video overlays scale2ref to the main frame (fix zoomed captions)
+
+**What**: `merge_video_overlay()` uses
+`[1:v][0:v]scale2ref[ov][base];[base][ov]overlay=...` instead of bare
+`overlay=0:0`. Image merge applies `ImageOps.exif_transpose` before
+compositing; still resizes full-frame overlays to main size.
+
+**Why**: On a real Las extract, 0/2262 video+overlay pairs shared pixel
+size (overlays commonly ~1.5× or taller than the video). Without scaling,
+ffmpeg kept overlay-native pixels and clipped them → magnified text
+banners. Scale overlay *to* the video (not the reverse).
+
+### 2026-07-29 - Export diagnosis shows ZIP size / year span / empty-URL note; Start warns on low disk
+
+**What**: `ExportAnalysis` gains `year_min`/`year_max`/`zip_bytes`; Save
+memories summary surfaces them. `start_download()` warns when free space
+on the output drive is under ~2× ZIP size (Cancel / Continue anyway).
+
+**Why**: Users need to know immediately whether the export is usable
+offline and how big the run will be before a multi-hour extract.
+
+### 2026-07-26 - Same-day photo JSON matching uses ZIP entry mtimes
+
+**What**: `extract_media_from_zips()` now restores each file's mtime from
+the ZIP entry (`_restore_zip_entry_mtime`). `build_deterministic_match_map()`
+sorts same-day **photos** by that mtime when the bucket's mtimes are not
+all identical (≥2s spread); otherwise falls back to UID-stem order.
+Videos still use embedded `creation_time` (2026-07-14 entry).
+
+**Why**: Empty Download Link exports have no media-id match. UID-stem
+order silently swapped photo time/GPS on multi-photo days (confirmed vs
+Snap + All-In-One on Las samples 1/5/7/8, especially 2024-07-07). Snapchat
+strips photo EXIF but leaves capture-related clock digits in ZIP entry
+times; preserving and sorting by them pairs rows correctly. Stomped
+extracts (all mtimes equal) keep the old UID fallback so we don't invent
+order. Focused check: `scripts/test_photo_mtime_samples_1578.py`.
+
+### 2026-07-19 - Account section becomes an inline New/Old account toggle; folders always suffixed `-memories`; layout persisted per account
+
+**What**: Replaced the per-export `AccountRunChoiceDialog` modal (previous
+entry below) and the separate "After processing" account combo with a single
+always-visible **Account** section at the top of the Save memories tab
+(`gui/tabs/save_memories_tab.py`): a `New account`/`Old account` radio toggle,
+a name field + Create button for the former, Confirm/Change output folder
+buttons for the latter, and one `active_account_label` banner showing the
+resolved folder. `_active_account_name` (via `_set_active_account()`) is now
+the *only* "which account" state in the tab - `_account_name()` and
+`_after_processing_account_name()` are both aliases onto it, so a run and
+every "After processing" button always agree. Every account name gets
+`ensure_memories_suffix()` applied (`Las` → `Las-memories`), and the user
+media root is renamed `downloads/` → `Memories/` (`MEMORIES_DIRNAME`,
+`migrate_account_layout()`). "Choose ZIP files" and "Choose folder" are now
+one function, `select_export_folder()` (folder-picker only - the empty-state
+hint tells the user to put all ZIP parts in one folder first). The
+"selected account folder:" combo is gone entirely; the Account section's
+banner is the only place a resolved save path is shown.
+
+New `AccountPaths.for_account()`/`for_user()` `keep_raw` kwarg controls
+flat-vs-nested layout: `Memories/` directly (or `Desktop/<account>/`
+directly) when there are no raw copies (the common case - avoids a
+pointless single-child `merged/` folder), `Memories/merged/`+`Memories/raw/`
+only when raw copies genuinely exist. Because an account's actual layout
+must never depend on today's live Technical view toggle (see the persisted-
+layout entry directly below), `_account_paths()` resolves `keep_raw` from
+disk for existing accounts, not from the live checkbox.
+
+The standalone "Deep scan for re-exported duplicates" button was removed -
+redundant now that the deep scan already runs automatically in every run
+(see the duplicate-detection entries below). "Review duplicates" absorbed
+its job: checks the byte-scan cache, then also always checks for a cached
+visual-scan report, surfacing whichever kind(s) found groups.
+`review_duplicates_btn` is enabled only once the active account has files in
+`merged/` - not just "an account is selected." All After-processing buttons
+now grey out via new `#accentBtn:disabled`/`#toolbarBtn:disabled`/
+`#runAction:disabled`/`QLineEdit:disabled`/`QLabel:disabled` QSS rules
+(`smd/theme.py`) - previously they looked identical whether enabled or not,
+because their own non-`:disabled` object-name rules beat the generic
+`QPushButton:disabled` rule by specificity.
+
+**Why**: User asked for the New/Old-account choice to be a toggle (not a
+per-export modal), for the two folder pickers to be one function, for
+After-processing buttons to visibly grey out instead of silently doing
+nothing, and for the redundant Deep-scan button to go away since it now
+happens automatically. Also asked for two clearly separate mental models -
+"default: name-memories > merged(-or-merged/raw) > media files" vs
+"technical view: name-memories > technical > merged(-or-merged/raw) > media
+files" - hence the flat-vs-nested `keep_raw` layout and the `Memories/`
+rename (so the *user-facing* wording never says "downloads", which was
+never accurate - nothing is downloaded, SMK processes an export already on
+disk).
+
+### 2026-07-19 - Per-account layout (simple/technical, base dir, keep_raw) persisted instead of re-derived from live UI state; legacy folders self-heal on any lookup, not just on create
+
+**What**: `save_account_layout_info()`/`load_account_layout_info()`/
+`resolve_existing_account_layout()` (`smd/account_layout.py`) persist which
+physical layout an account actually uses, into the same
+`technical/account_identity.json` the mydata-ID bookkeeping already used.
+`_account_paths()` (`gui/tabs/save_memories_tab.py`) now trusts this for any
+account that has it, and only falls back to today's live Technical
+view/"Also save without filters" state for a genuinely brand-new account.
+
+Two real bugs found and fixed while wiring this up (both regression-tested
+in `tests/test_account_layout.py`):
+1. `_account_paths(name, create=False)` (used by "Confirm output folder" for
+   an old account, and every After-processing button) used to skip
+   migration entirely, calling `AccountPaths.for_account()` directly instead
+   of `resolve_account_paths(..., migrate=True)`. A legacy account still
+   using the old `downloads/` name (real accounts on this machine, `Las`/
+   `Mary`, are in exactly this state) would resolve to an empty, not-yet-
+   renamed `Memories/` and every button would look broken until the user
+   ran a full new process. Fixed by routing the `create=False` path through
+   `resolve_account_paths()` too (migration is pure renames, safe on a read
+   path) and adding the equivalent `elif paths.account_dir.exists():
+   migrate_account_layout(paths)` for simple-mode accounts.
+2. `migrate_account_layout()`'s directory-merge step only merged one level
+   deep. `ensure_dirs()`/`ensure_user_dirs()` can pre-create empty
+   `Memories/merged/`+`Memories/raw/` stub folders *before* migration runs
+   (the `create=True` path); the old shallow merge saw "`Memories/merged`
+   already exists" and skipped moving legacy `downloads/merged/` into it at
+   all, silently orphaning every file nested inside. Fixed with
+   `_deep_merge_dir()`, a recursive version that merges into an
+   already-existing target instead of skipping it. Caught by
+   `test_migrate_account_layout_keeps_nesting_when_keep_raw_true` failing
+   during test-writing, not by manual testing.
+
+Also added `collapse_merged_to_flat()`: accounts created before `keep_raw`
+existed always nested `merged/`(+`raw/`) even with zero raw copies: this
+flattens that specific legacy shape (no `raw/` content present) to match the
+new flat default, and deliberately leaves genuine `keep_raw=True` accounts
+(real `raw/` content) nested.
+
+**Why**: The user reported "the buttons in the After processing box don't
+work unless technical view is selected" - root cause was `_account_paths()`
+recomputing the physical location from *today's* toggle state instead of
+where the account actually lives on disk. Fixing that exposed the two
+migration bugs above, both of which are real risks for this user's own
+`Las`/`Mary` accounts (still on disk in the pre-rename `downloads/` shape,
+`Las` with genuine `raw/` content) the first time those accounts get
+confirmed/re-processed under the new code.
+
+### 2026-07-19 - `_list_known_accounts()` must exclude the technical base dir itself from the Desktop scan
+
+**What**: `_list_known_accounts()` (`gui/tabs/save_memories_tab.py`) unions
+two disk scans for "Old account" candidates: the technical base dir's direct
+children, and `Desktop/`'s direct children (for simple-mode accounts,
+heuristically: has stored layout info, or is just non-empty). When the
+technical base dir itself lives directly on the Desktop - true for this
+user's real setup (`Desktop\Memories`, containing real `Las`/`Mary`
+account folders) and for the default `Desktop/SMD Media` - the second scan
+found the base dir folder itself (non-empty, since it holds real accounts)
+and offered it as if it were a simple-mode account of its own. Fixed by
+skipping any Desktop child whose resolved path equals the resolved base
+dir.
+
+**Why**: Found via manual smoke-testing the New/Old account toggle end to
+end against this user's real base dir - the "Old account" candidate showed
+"Memories" (the container) instead of "Las"/"Mary" (the real accounts). Left
+uncaught by unit tests since it needs a `QApplication` + real/patched
+`AccountPaths` classmethods together; this codebase has no GUI test harness
+yet (see `ARCHITECTURE.md`'s `QSettings` gotcha for why constructing
+`DownloaderGUI()` for this kind of test needs care).
+
+### 2026-07-19 - Replaced automatic ZIP-identity account naming with an explicit New run / Continue run prompt
+
+**What**: Reverted the GUI's use of the export's own account info for naming.
+`AccountRunChoiceDialog` (`gui/dialogs.py`), shown by
+`_prompt_account_for_export()` (`save_memories_tab.py`) right after ZIP
+selection, now always asks the user directly: **"New run"** (type/edit a name,
+pre-filled only from folder/parent-folder naming - never from account.json) or
+**"Continue an existing run (may not be finished)"** (pick from
+`_list_known_accounts()`). This replaces the old `_apply_account_from_export()`
+which silently called `extract_account_identity_from_zip()` and even
+auto-renamed existing folders on disk. `extract_account_identity_from_zip()`,
+`AccountIdentity`, `format_account_folder_name()`,
+`derive_account_name_from_export()` (`smd/export_detect.py`) and
+`rename_simple_mode_account()`/`rename_technical_mode_account()`
+(`smd/account_layout.py`) are kept (still tested, still correct utilities) but
+are no longer called from the GUI. `save_account_identity()` is still called,
+but now only ever with `mydata_ids` (never `username`/`display_name`) - purely
+to let the dialog default to "Continue" + the right folder when the exact
+same export is re-selected later, which needs no personal data at all.
+
+**Why**: The prior approach (2026-07-19, "Read the real Snapchat username...")
+required the export to include `account.json`/`account_history.json`, which
+in practice is often missing (memories-only exports, like the user's own Las
+export) and implicitly nudged toward "request Account Information too" -
+personal data (username, display name, email/phone are all in that same file)
+that the naming feature didn't need to touch. The user explicitly asked to
+stop relying on it and instead just ask directly: is this a new account, or a
+continuation of one you already started? This is simpler, needs zero personal
+data, and is unambiguous - no guessing, no silent folder renames.
+
+### 2026-07-19 - "Unknown account N" fallback, made rename-safe via a stored mydata ID
+
+**What**: When an export has no readable username/display name (no
+`account.json`/`account_history.json` in the ZIP at all - the common case for
+older/memories-only Snapchat exports) and no usable folder name either,
+`derive_account_name_from_export()` now assigns `Unknown account N` via
+`next_unknown_account_name()` (lowest free `N`, scanning existing folders)
+instead of the old opaque `Memories {mydata-id}` fallback.
+
+The tricky part the user asked about directly: **what happens if the user
+renames that folder?** Fixed by persisting the export's `mydata~ID` (not just
+username/display name) into `technical/account_identity.json` unconditionally
+- `save_account_identity()` is now called even when there's no identity at all,
+both from `_apply_account_from_export()` (ZIP-selection preview) and
+`start_download()` (run start, `save_memories_tab.py`). `AccountIdentity` grew
+a `mydata_ids: frozenset[str]` field, and `AccountIdentity.matches()` treats a
+shared ID as an automatic match regardless of name fields.
+`find_existing_account_folder_name()` checks this first, before username/
+display-name/legacy-folder-name matching. Net effect: rename `Unknown account
+1` to anything, even something with zero identifying text (e.g. `Random
+Friend`) - re-selecting the *same* export later resolves back to `Random
+Friend`, not a new `Unknown account 2`. Covered by
+`test_unknown_account_folder_survives_rename_to_unrelated_name` in
+`tests/test_derive_account_name.py`.
+
+**Why**: User asked for a clear placeholder name instead of `Memories {id}`,
+then immediately asked "but what if the user renames the folder?" - a real
+edge case, since a plain folder-name-based fallback would otherwise silently
+create duplicate folders for the same account after any rename.
+
+### 2026-07-19 - Account folder names use display name + username from the export
+
+**What**: `AccountIdentity` + `format_account_folder_name()` in
+`smd/export_detect.py` now read both `display_name` and `username` from the
+export's account info file and format folder names like `Las (las_snap)` when
+both differ - so multiple accounts are easy to tell apart. When the user
+re-selects an export for an account that already exists under a vaguer old
+name (e.g. `Las`), `_apply_account_from_export()` in `save_memories_tab.py`
+renames both the Desktop library folder and the matching internal
+`%LOCALAPPDATA%` account root via `rename_simple_mode_account()` /
+`rename_technical_mode_account()` (`smd/account_layout.py`). Identity is
+persisted to `technical/account_identity.json` for later folder matching.
+Simple-mode "After processing" account list now also scans `Desktop/<account>/`
+(not just the technical base dir).
+
+**Why**: User asked to rename account names to whatever identifying
+information the export actually contains, instead of relying on manual folder
+names like `Las` / `Mary` or opaque `Memories {id}` fallbacks.
+
+### 2026-07-19 - Read the real Snapchat username out of the export ZIP for account naming
+
+**What**: `extract_account_username_from_zip()` (`smd/export_detect.py`) opens
+each selected ZIP part, finds `json/account.json` or `account_history.json`
+(filename varies by export format version), and recursively searches the
+parsed JSON for any key named `username` (case-insensitive, any nesting -
+Snapchat's own export key casing has varied). `derive_account_name_from_export()`
+now tries this **first**, before the folder-name heuristics added in the
+"removed Where to save" change below - it overrides even an explicitly
+selected/named folder, since the real username is authoritative and a folder
+name is just a guess at it. Falls back to the existing heuristics silently if
+no account file is present (e.g. user deselected "Account Information" when
+requesting the export) or it has no readable username. `save_memories_tab.py`
+(`_apply_account_from_export`) also tracks whether the name came from this
+authoritative source (`_account_name_from_zip`) purely to add "(from your
+Snapchat account)" to the export summary banner - not used for any logic.
+
+**Why**: User asked to check whether the account name is visible inside the
+ZIP itself rather than only inferred from how they happened to organize
+folders/files on disk. It is (confirmed against public docs on Snapchat's
+"Download My Data" format); using it directly is more reliable than folder
+naming and works even when the user selects loose ZIP files sitting in a
+generic folder (e.g. `Downloads/`), which previously fell through to the
+unfriendly `Memories {mydata-id}` fallback.
+
+### 2026-07-19 - Sped up the visual duplicate scan with a per-file cache (not a pre-filter)
+
+**What**: `scan_visual_duplicates()` (`smd/duplicates.py`) now persists a
+`duplicates_visual_hash_cache.json` (filename -> size/mtime_ns/hash). A file
+is only decoded if its size or mtime changed since the cached entry - on a
+repeat scan of an unchanged library, every file is skipped and no ffmpeg/PIL
+work happens at all.
+
+**Why**: after making the scan automatic on every run (entry below), the
+user asked to make the ~20-minute first-run cost faster. The first attempt
+was a "cheap fingerprint" pre-filter: read each video's duration+resolution
+via ffprobe (no decode, in isolation ~3x faster than a full decode) and only
+fully decode videos that share a fingerprint with another video - the video
+equivalent of the byte scan's same-size bucketing. **This made things worse
+in practice**, not better: spawning ~8,400 ffprobe processes across 12
+threads in parallel overloaded the machine badly enough that even unrelated
+PowerShell commands (`Get-Process`) stalled for tens of seconds, and when the
+runaway scan was force-killed, its child `ffmpeg.exe`/`ffprobe.exe`
+processes were orphaned (Windows doesn't cascade-kill children of a
+force-killed parent) and kept running/contending for resources afterward.
+Per-file subprocess-spawn overhead (~150-400ms, likely AV real-time scanning
+of each new process) dominated the "cheap" check's cost almost as much as
+the real decode, so the pre-filter pass was nearly pure added cost with an
+unproven benefit (duplicate detection on Snapchat clips is also undermined by
+many unrelated videos sharing the same near-max recording-length duration,
+weakening the fingerprint's ability to discriminate). It was fully reverted.
+
+**Trade-off**: the very first scan of an existing large library still takes
+the full decode time (no way around it - only playback can tell two videos
+apart). Only repeat scans benefit. This is the expected common case though:
+most processing runs on an account are re-runs/incremental additions, not a
+brand new multi-thousand-file library every time.
+
+**Lesson for future agents**: be very wary of "add a cheap pass to filter
+candidates before the expensive pass" optimizations when the cheap pass
+still means spawning one OS process per file - on Windows in particular,
+process-creation overhead (and AV scanning of each new process) can dominate
+over the actual work being skipped, especially at thread-pool concurrency
+across thousands of files. Measure the *pre-filter's own cost at full scale*
+before trusting it, not just per-file in isolation with a small sample.
+
+---
+
+### 2026-07-19 - Made the visual duplicate scan run automatically in every processing run
+
+**What**: Moved `scan_visual_duplicates()` from GUI-triggered-only into
+`process_bundled_export()` itself (`smd/local_pipeline.py`, right after the
+existing `scan_content_duplicates()` call), so it now runs unconditionally
+on every full processing run, same as the byte scan. `SessionReport` gained
+`visual_duplicate_groups` (`smd/session_report.py`), and
+`_after_processing_summary()` (`gui/tabs/completion.py`) now auto-opens
+`DuplicateReviewDialog` for it too, right after the byte-scan dialog (if
+any) closes.
+
+**Why**: Immediately after shipping the opt-in version (previous entry
+below), the user asked for it to be automatic/built into the main run
+instead of a separate button they'd have to remember to click - the whole
+point is catching duplicates they don't know to look for.
+
+**Trade-off (accepted deliberately)**: every full processing run now also
+pays the visual scan's full-decode cost - no same-size shortcut is possible,
+so this added ~20 minutes to processing on the user's 13.9k-file library.
+The "Deep scan for re-exported duplicates" button/worker were kept (not
+removed) for on-demand re-checks when the cache is missing or stale, but in
+the normal case they just hit the cache the pipeline already wrote.
+
+---
+
+### 2026-07-19 - Added a "visual" (decoded-content) duplicate scan alongside the byte scan
+
+**What**: `smd/duplicates.py` gained `scan_visual_duplicates()` /
+`load_cached_visual_duplicate_report()` (report `kind="visual"`, cached to
+`reports/duplicates_visual_report.json`), a `VisualDuplicateScanWorker`, and
+a "Deep scan for re-exported duplicates" button next to "Review duplicates"
+in Save memories → After processing. It reuses `DuplicateReviewDialog`
+(which now branches its wording/cache file on `report.kind`) instead of a
+new UI.
+
+**Why**: A user had pairs of videos with different filenames/timestamps that
+looked identical when played. Investigation (hashing the *original* files in
+`technical/staging/`, before SMK ever touched them) proved Snapchat's own
+export had logged the same recording twice under separate UUIDs/timestamps -
+different container bytes (so whole-file SHA-256, and thus the existing
+byte-identical scan, never matches them), but byte-identical *decoded* video
+frames. A full-library scan on that user's ~13.9k-file export found 269 such
+groups (~1 GB of true extra copies) that "Review duplicates" had correctly
+never flagged. Root cause is Snapchat's export data, not an SMK bug - so this
+adds a way to *find* them without changing what the byte scan considers a
+duplicate.
+
+**Trade-off**: Decoding every file (no same-size shortcut, since re-exported
+copies can differ in size) took ~20 minutes for 13.9k files - too slow to run
+automatically. Kept strictly opt-in with an explicit file-count confirmation
+dialog before starting, unlike the byte scan which can run unattended after a
+run.
+
+---
+
+### 2026-07-19 - Auto-derived account name from export selection; removed "Where to save"
+
+**What**: Dropped the manual "Where to save" / project name field on Save
+memories. When the user picks export ZIPs, `derive_account_name_from_export()`
+(`smd/export_detect.py`) sets `_derived_account_name`: folder name if they
+selected a folder (e.g. `Las/`), else parent folder of the ZIPs if not generic
+(`Downloads` skipped), else existing output folder matching the mydata ID,
+else `Memories {id}`. The yellow export summary banner shows account + save
+path.
+
+**Why**: ZIP filenames are opaque (`mydata~1783…`); users already organize
+exports in named folders — use that instead of a redundant text field.
+
+### 2026-07-19 - Palestine tab with resource links and policy-focused framing
+
+**What**: New **Palestine** main tab (`PalestineTabMixin`, `smd/palestine_content.py`)
+between File Checker and Help. Lists external human-rights/education/donation
+sites (B'Tselem, Al-Haq, UN OCHA, Amnesty, HRW, Decolonize Palestine, IMEU,
+Electronic Intifada, MATW) with short blurbs; includes user-requested solidarity
+phrases focused on occupation, accountability, and documented violations.
+Header `Free Palestine` tooltip now points users to this tab plus the existing
+MATW donation link.
+
+**Why**: User wanted in-app education/help beyond the header link, using
+action/policy framing (not people-as-enemies language). Expanded 2026-07-19
+with oppression aspects, journalist killings (CPJ/RSF), whistleblower sources
+(Breaking the Silence, +972), and BDS/boycott resources. Deliberately omitted
+dehumanizing or unverified conspiracy claims.
+
 ### 2026-07-19 - Flattened the "accounts" folder for Technical view custom base dirs
 
 **What**: `_account_paths()` (`gui/tabs/save_memories_tab.py`) used to put
@@ -22,7 +868,7 @@ the two other places that assumed the `accounts/` subfolder:
 `restore_account_name_field()`'s single-account auto-fill.
 
 **Why**: User found the extra nesting level pointless when the base dir is
-already dedicated to SMD's own output (which it normally is, once picked).
+already dedicated to SMK's own output (which it normally is, once picked).
 Simple mode never had this wrapper to begin with, so this just makes
 Technical view consistent with it.
 
@@ -66,7 +912,7 @@ the same way it already does `assets/ui/*`.
 `widgets`, `workers`, `dialogs`, `single_instance`, `window_chrome`, and
 `tabs/*` mixins). `desktop_gui_pyqt.py` is now a thin entry
 (`DownloaderGUI.__init__` + slim `init_ui` shell + `main()`). Entry path
-for PyInstaller/`Run-SMD.bat` unchanged.
+for PyInstaller/`Run-SMK.bat` unchanged.
 
 **Why mixins (not composition)**: every tab/handler already used `self.foo`
 across concerns; mixins preserve that shared state without a months-long
@@ -86,7 +932,7 @@ circular imports.
 **What (icon)**: The DALL-E-generated icon added earlier the same day was
 reverted. The user wanted the original yellow download-arrow icon back
 (`icon.ico`/`icon.png`/`assets/icon.*`), which was still recoverable
-byte-for-byte from the `Baseline: SMD v1.0.0` commit. Restored via
+byte-for-byte from the `Baseline: SMK v1.0.0` commit. Restored via
 `git checkout 9d3e36f -- icon.ico assets/icon.ico assets/icon.png`, then
 copied to the loose root-level `icon.png` (never tracked, only used at
 runtime/build time) and rebuilt so both the taskbar and window titlebar
@@ -124,14 +970,14 @@ stays exactly where it already was: automatic, inside `_fix_extension()`
 **Why**: user wanted a clean mental model - "File checker should only check
 files... the fixing stuff should be in save memories." Investigation showed
 the fixing already only ever happened in the Save Memories pipeline for
-SMD's own output; File Checker's rename-on-scan behavior was leftover
+SMK's own output; File Checker's rename-on-scan behavior was leftover
 functionality for arbitrary external folders that blurred that line and
 wasn't asked for.
 
 **What (metadata stats)**: Tested real Make/Model EXIF and video container
 tags on live Las-account output. Confirmed Snapchat strips all camera/device
 identifying metadata from both photos and videos before export (only
-`DateTime`/`GPSInfo`/`Orientation` survive on photos - and SMD wrote those -
+`DateTime`/`GPSInfo`/`Orientation` survive on photos - and SMK wrote those -
 plus generic `Core Media Video/Audio` handler names on videos). Added a
 photo resolution breakdown to File Checker's media stats instead ("N unique
 resolutions, most common WxH") as an honest proxy stat, and explicitly did
@@ -142,10 +988,10 @@ behind it.
 `assets/` - they did not exist anywhere in the repo before, despite four
 separate code paths (`apply_window_icon()`, the `DownloaderGUI.__init__`
 icon set, the header logo, the splash screen logo) all being wired up to
-load one if present. This is also why the *compiled* `SMD.exe` had no icon
+load one if present. This is also why the *compiled* `SMK.exe` had no icon
 either, not just source/bat runs - `smd.spec`'s `icon_arg` silently
 resolved to `None`. Also added `SetCurrentProcessExplicitAppUserModelID`
-so Windows gives SMD its own taskbar identity instead of grouping it under
+so Windows gives SMK its own taskbar identity instead of grouping it under
 pythonw.exe's generic icon when run from source.
 
 **Why not implement**: cloud upload, a media gallery grid, and macOS/Linux
@@ -167,7 +1013,7 @@ verification/finalize done" - not just the extract/merge phase - since that
 tail work (`StagingVerifyWorker`, `CompletionFinalizeWorker`) can also run
 for minutes on a large library.
 
-**Why**: user with an AMD RX 6900 XT reported SMD getting dramatically slower
+**Why**: user with an AMD RX 6900 XT reported SMK getting dramatically slower
 partway through a multi-hour run, coinciding with the monitor going to sleep;
 `Ctrl+Shift+Win+B` (restarts the GPU driver) was their existing workaround.
 Checked the actual run log (`run_activity_20260716_204525.log`, Las account,
@@ -176,8 +1022,8 @@ hours, then dropped to ~10-45 files/min from roughly 23:25 to 00:20 - the
 window spanning the monitor-sleep report (~23:01) and the driver restart
 (~23:32) - before recovering. That's a real, measurable 2-4x slowdown, not
 just a perception. Rather than try to detect/recover from the AMD post-wake
-render slowdown (a driver-level issue outside SMD's control), it's simpler
-and fully sufficient to just never let the display/system sleep while SMD
+render slowdown (a driver-level issue outside SMK's control), it's simpler
+and fully sufficient to just never let the display/system sleep while SMK
 has active work in flight. Deliberately does NOT keep the machine awake
 outside of a run - normal power saving is untouched the rest of the time.
 
@@ -308,7 +1154,7 @@ which real file whenever 2+ items of the same type shared a UTC day.
 
 Fixed by sorting video items (only) by each file's own embedded
 `creation_time`, read directly off the staged file via ffprobe *before*
-SMD writes anything to it (`metadata.read_video_capture_time`). This is
+SMK writes anything to it (`metadata.read_video_capture_time`). This is
 the phone's own encoder timestamp, and it reliably preserves the same
 relative order as the JSON `Date` field (empirically: `Date` consistently
 lags a video's own `creation_time` by ~15-40s, the "saved to memories"
@@ -328,7 +1174,7 @@ neighbor out of place.
 clip (`21:56` local). Traced the video's *own* embedded `creation_time`
 (read straight from the original ZIP, confirmed by content: matched the
 exact scene in the user's screenshot) to `19:57:12 UTC`, one JSON row
-away from what SMD had actually assigned it (`14:31:37 UTC` - a
+away from what SMK had actually assigned it (`14:31:37 UTC` - a
 completely different, unrelated clip's row). Rebuilding the whole day's
 video group by hand confirmed **4 of 6** videos that day were mismatched
 under the old UID-string sort; all 6 came out correct once sorted by
@@ -358,7 +1204,7 @@ dependencies entirely (removed from `requirements.txt`, `pyproject.toml`,
 Snapchat's own app displayed as `21:56`. Root cause: the phone's system
 timezone stayed on the user's home zone (Denmark, UTC+2) the whole trip
 (no auto-update while roaming), so Snapchat displays every timestamp in the
-*device's configured timezone*, never the GPS-implied one. SMD's GPS-based
+*device's configured timezone*, never the GPS-implied one. SMK's GPS-based
 conversion was "geographically accurate" but disagreed with what the
 Snapchat app - and the user's memory - actually showed. Confirmed by
 recomputing the raw UTC timestamps against the user's home timezone: the
@@ -499,7 +1345,7 @@ checking whether `h264_nvenc`/`h264_amf`/`h264_qsv` appeared in `ffmpeg
 frame) per candidate, run once and cached, that only returns an encoder id
 if it *actually produces output* on this machine.
 
-**Why**: "full" ffmpeg builds (including the one SMD bundles) compile in the
+**Why**: "full" ffmpeg builds (including the one SMK bundles) compile in the
 NVENC/AMF/QSV wrapper code unconditionally - `-encoders` lists all three
 regardless of what GPU is actually installed. On a real AMD-only machine
 (RX 6900 XT, no NVIDIA hardware at all) this meant `h264_nvenc` was always
@@ -556,7 +1402,7 @@ and silent auto-delete entirely. Only visible with Technical view on;
 defaults to **off**. All Technical-view-only controls now render in red
 (`smd.theme.technical_text_style`).
 
-**Why**: the average SMD user will never open Technical view and has no
+**Why**: the average SMK user will never open Technical view and has no
 mental model of "staging" - for them, silent verify-then-delete-on-success
 after a run is correct and expected, and must stay the default. The
 checkbox exists purely as an opt-out for people who want to manually inspect

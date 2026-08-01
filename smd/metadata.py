@@ -204,14 +204,14 @@ def copy_video_with_metadata(src: Path, dest: Path, memory: Memory) -> bool:
 
 def _apply_video_mutagen_tags(file_path: Path, memory: Memory) -> None:
     """Write the iTunes-style ``\xa9day``/``\xa9xyz`` atoms mutagen exposes -
-    used by SMD's own GPS map and Apple software. Pure Python, no subprocess."""
+    used by SMK's own GPS map and Apple software. Pure Python, no subprocess."""
     try:
         video = MP4(str(file_path))
         date_iso = get_local_datetime(memory).strftime("%Y-%m-%dT%H:%M:%S%z")
         video["\xa9day"] = [date_iso]
         try:
             video["\xa9nam"] = ["Snapchat Memory"]
-            video["\xa9swr"] = ["SMD"]
+            video["\xa9swr"] = ["SMK"]
         except Exception:
             pass
 
@@ -228,7 +228,7 @@ def apply_video_metadata(file_path: Path, memory: Memory, *, container_date_done
     """Apply MP4/MOV metadata: always write capture date; GPS when available.
 
     Sets both the container ``creation_time`` (recognized by Explorer, Photos,
-    players) and the iTunes-style ``\xa9day``/``\xa9xyz`` atoms (used by SMD's
+    players) and the iTunes-style ``\xa9day``/``\xa9xyz`` atoms (used by SMK's
     own GPS map and Apple software).
 
     ``container_date_done`` lets a caller that already embedded the container
@@ -320,7 +320,7 @@ def _gps_info_from_ifd(gps_ifd: dict) -> dict:
 
 
 def _extract_gps_exif_library(image_path: Path) -> tuple[float, float] | None:
-    """Read GPS using python-exif (same format SMD writes)."""
+    """Read GPS using python-exif (same format SMK writes)."""
     try:
         with open(image_path, "rb") as f:
             img = exif.Image(f)
@@ -399,7 +399,7 @@ def _parse_iso6709(value):
     return None
 
 def read_video_capture_time(video_path: Path) -> datetime | None:
-    """Read a video's own embedded ``creation_time``, before SMD writes
+    """Read a video's own embedded ``creation_time``, before SMK writes
     anything to it - this is the phone's own encoder timestamp, present on
     Snapchat's bundled export files straight out of the ZIP.
 

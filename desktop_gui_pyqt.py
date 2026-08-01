@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Snapchat Memories Downloader (SMD) - Desktop GUI
+Snapchat Memories Keeper (SMK) - Desktop GUI
 Professional native Windows application for downloading Snapchat memories with GPS embedding
 
 Created by: Las HS (https://github.com/LasHSHS)
@@ -13,7 +13,7 @@ import os
 # Under pythonw.exe (no console) sys.stdout / sys.stderr are None. Any print() or
 # flush() — including ones triggered inside imported libraries at import time —
 # raises AttributeError and kills the app silently before __main__ ever runs.
-# Redirect both streams to smd_gui.log (or a null sink) as the very first thing.
+# Redirect both streams to smk_gui.log (or a null sink) as the very first thing.
 if sys.stdout is None or sys.stderr is None:
     try:
         # When frozen (PyInstaller), __file__ resolves inside _internal/, which
@@ -25,7 +25,7 @@ if sys.stdout is None or sys.stderr is None:
             else os.path.dirname(os.path.abspath(__file__))
         )
         _early_log = open(
-            os.path.join(_log_dir, 'smd_gui.log'),
+            os.path.join(_log_dir, 'smk_gui.log'),
             'a', encoding='utf-8', buffering=1,
         )
     except OSError:
@@ -52,11 +52,33 @@ from gui.tabs.completion import CompletionMixin
 from gui.tabs.file_checker_tab import FileCheckerTabMixin
 from gui.tabs.guide_tab import GuideTabMixin
 from gui.tabs.help_about_tabs import HelpAboutTabMixin
+from gui.tabs.palestine_tab import PalestineTabMixin
 from gui.tabs.save_memories_tab import SaveMemoriesTabMixin
 from gui.window_chrome import WindowChromeMixin
+from smd.branding import (
+    APP_NAME,
+    APP_SHORT,
+    APP_USER_MODEL_ID,
+    PERF_SETTINGS_APP,
+    PERF_SETTINGS_ORG,
+    window_title,
+)
 
 
-class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesTabMixin, FileCheckerTabMixin, CompletionMixin, HelpAboutTabMixin):
+# Mixins must come before QMainWindow so Python/sip resolve closeEvent (and any
+# future showEvent) to the mixin implementations. QMainWindow-first MRO made
+# mixin event handlers easy to break: a mixin showEvent that called
+# super().showEvent() re-entered sip and aborted with 0xC0000409 on show.
+class DownloaderGUI(
+    WindowChromeMixin,
+    GuideTabMixin,
+    SaveMemoriesTabMixin,
+    FileCheckerTabMixin,
+    CompletionMixin,
+    PalestineTabMixin,
+    HelpAboutTabMixin,
+    QMainWindow,
+):
     def __init__(self):
         super().__init__()
         # Set window flags to ensure it shows in taskbar
@@ -70,9 +92,13 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
         self._map_html_temp_files: list[Path] = []
         self.init_ui()
         self.processing_shield = ProcessingShieldOverlay(self)
-        self.stdout_redirector = StreamRedirector(self.append_debug_message)
+        # Keep the real console streams when launched from SMKTester.bat (python.exe);
+        # tee into the GUI debug panel instead of replacing stdout outright.
+        _real_out, _real_err = sys.__stdout__, sys.__stderr__
+        self.stdout_redirector = StreamRedirector(self.append_debug_message, also=_real_out)
+        self.stderr_redirector = StreamRedirector(self.append_debug_message, also=_real_err)
         sys.stdout = self.stdout_redirector
-        sys.stderr = self.stdout_redirector
+        sys.stderr = self.stderr_redirector
         self.run_startup_self_check()
         if getattr(sys, 'frozen', False):
             try:
@@ -83,7 +109,7 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
                     lambda: QMessageBox.warning(
                         self,
                         'Incomplete build',
-                        'This copy of SMD cannot process bundled ZIP exports.\n\n'
+                        'This copy of SMK cannot process bundled ZIP exports.\n\n'
                         'Reinstall from the official release package.',
                     ),
                 )
@@ -108,7 +134,7 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
     def init_ui(self):
         from smd.theme import WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH
         from smd.version import __version__
-        self.setWindowTitle(f'Snapchat Memories Downloader v{__version__}')
+        self.setWindowTitle(window_title(__version__))
         self.setGeometry(100, 100, 1280, 820)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         
@@ -172,10 +198,12 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
         header_layout.addWidget(self.header_logo)
 
         title_col = QVBoxLayout()
+        title_col.setContentsMargins(0, 0, 0, 0)
         title_col.setSpacing(2)
-        header = QLabel('Snapchat Memories Downloader')
+        header = QLabel(APP_NAME)
         header.setProperty('class', 'pageTitle')
         subtitle_row = QHBoxLayout()
+        subtitle_row.setContentsMargins(0, 0, 0, 0)
         subtitle_row.setSpacing(8)
         subtitle = QLabel(f'Version {__version__}')
         subtitle.setProperty('class', 'caption')
@@ -209,7 +237,10 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
         self.free_palestine_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.free_palestine_label.setOpenExternalLinks(True)
         self.free_palestine_label.setCursor(Qt.PointingHandCursor)
-        self.free_palestine_label.setToolTip('Donate or learn more - opens in your browser')
+        self.free_palestine_label.setToolTip(
+            'Learn about the occupation and how to help — see the Palestine tab, '
+            'or click to open MATW donation page in your browser'
+        )
         free_palestine_font = QFont()
         free_palestine_font.setBold(True)
         self.free_palestine_label.setFont(free_palestine_font)
@@ -217,7 +248,7 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
 
         self.support_btn = QPushButton('Support me')
         self.support_btn.setObjectName('supportBtn')
-        self.support_btn.setToolTip('Ways to support SMD - free options and optional tips')
+        self.support_btn.setToolTip('Ways to support SMK - free options and optional tips')
         self._populate_support_menu(self.support_btn)
         header_layout.addWidget(self.support_btn)
 
@@ -237,6 +268,7 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
         self._tab_file_checker = 2
         self._tab_help = 3
         self._tab_about = 4
+        self._tab_palestine = 5
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName('mainTabs')
@@ -252,6 +284,8 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
         self._add_file_checker_tab()
 
         self._add_help_and_about_tabs()
+
+        self._add_palestine_tab()
 
         tab_bar = self.tabs.tabBar()
         # Not setExpanding(True): that forces every tab to the *same* width,
@@ -318,7 +352,7 @@ class DownloaderGUI(QMainWindow, WindowChromeMixin, GuideTabMixin, SaveMemoriesT
         # Restore the user's last choice; fall back to the friendly default.
         from smd.system_profile import PERF_MODES, mode_to_combo_index
 
-        self._perf_settings = QSettings("SMD", "SnapchatMemoriesDownloader")
+        self._perf_settings = QSettings(PERF_SETTINGS_ORG, PERF_SETTINGS_APP)
         saved_mode = self._perf_settings.value("performance_mode_v1", None, type=str)
         self.performance_mode = saved_mode if saved_mode in PERF_MODES else 'balanced'
         self.perf_mode_combo.blockSignals(True)
@@ -365,13 +399,13 @@ if __name__ == '__main__':
     sys.stdout.flush()
 
     if sys.platform == 'win32':
-        # Claims a distinct taskbar/Alt-Tab identity for SMD so Windows shows
+        # Claims a distinct taskbar/Alt-Tab identity for SMK so Windows shows
         # our own icon instead of grouping under pythonw.exe's generic icon
-        # when running from source (the compiled SMD.exe doesn't need this,
+        # when running from source (the compiled SMK.exe doesn't need this,
         # since it isn't hosted by python.exe/pythonw.exe).
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('SMD.SnapchatMemoriesDownloader')
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
         except Exception:
             pass
     # Check for single instance — never blanket-kill other python processes at startup
@@ -379,20 +413,26 @@ if __name__ == '__main__':
     print(f"DEBUG: Checking if already running...")
     if single_instance.is_already_running():
         print("DEBUG: Another instance detected, bringing existing window to front...")
-        signal_file = Path(tempfile.gettempdir()) / 'snapchat_memories_show.signal'
-        try:
-            signal_file.write_text('show')
-            print(f"DEBUG: Signal file written to {signal_file}")
-        except Exception as e:
-            print(f"DEBUG: Error writing signal file: {e}")
-
+        alive = single_instance.request_show_existing()
         import time
+        # Give the live UI a moment to consume the signal file (polled every 100ms).
         time.sleep(1.5)
-        if signal_file.exists():
-            print("DEBUG: Prior instance did not respond — starting a fresh window")
+        signal_file = Path(tempfile.gettempdir()) / 'snapchat_memories_show.signal'
+        if signal_file.exists() and not alive:
+            # Lock owner is dead / not our GUI - safe to clear and start fresh.
+            print("DEBUG: Prior instance did not respond and lock owner is gone — starting fresh")
             single_instance.force_takeover()
         else:
-            print("DEBUG: Existing window brought to front")
+            # Discord/Spotify behavior: second launch only focuses the existing
+            # window. Never kill a live run just because the signal file lingered
+            # (UI can be busy during a long processing job).
+            print("DEBUG: Existing window brought to front (or already running); exiting second launch")
+            try:
+                if signal_file.exists() and alive:
+                    # Leave signal for the live instance's next poll tick.
+                    pass
+            except OSError:
+                pass
             sys.exit(0)
     
     # Fix for QtWebEngine cache/GPU errors on Windows
@@ -405,10 +445,17 @@ if __name__ == '__main__':
     app_font = QFont('Segoe UI')
     app_font.setPixelSize(FONT_SIZE_BASE)
     app.setFont(app_font)
-    app.setApplicationName("SnapchatMemoriesDownloader")
+    app.setApplicationName(APP_NAME)
     app.setOrganizationName("SnapchatMemoriesTeam")
-    # Only the main window should end the session (WA_QuitOnClose), not child modal dialogs.
-    app.setQuitOnLastWindowClosed(False)
+    # Taskbar / Alt-Tab identity: set app-wide icon (window icon alone is not
+    # always enough when hosted by pythonw.exe).
+    for _icon in (ROOT / 'assets' / 'icon.ico', ROOT / 'assets' / 'icon.png'):
+        if _icon.exists():
+            app.setWindowIcon(QIcon(str(_icon)))
+            break
+    # Quit when the main window closes. Child dialogs are parented to the main
+    # window so they don't keep a zombie python process alive after X is clicked.
+    app.setQuitOnLastWindowClosed(True)
 
     def _build_splash_pixmap() -> QPixmap:
         width, height = 440, 320
@@ -437,7 +484,7 @@ if __name__ == '__main__':
         painter.drawText(
             0, title_y, width, 30,
             Qt.AlignHCenter | Qt.AlignTop,
-            'Snapchat Memories Downloader',
+            APP_NAME,
         )
 
         subtitle_font = QFont('Segoe UI', 13)
@@ -470,7 +517,7 @@ if __name__ == '__main__':
         err_text = traceback.format_exc()
         print(f"DEBUG: Failed to create main window:\n{err_text}")
         try:
-            (ROOT / 'smd_gui.log').open('a', encoding='utf-8').write(
+            (ROOT / 'smk_gui.log').open('a', encoding='utf-8').write(
                 '\nSTARTUP FAILED:\n' + err_text + '\n'
             )
         except OSError:
@@ -478,9 +525,9 @@ if __name__ == '__main__':
         try:
             QMessageBox.critical(
                 None,
-                'SMD could not start',
-                f'Snapchat Memories Downloader failed to open.\n\n{exc}\n\n'
-                f'See smd_gui.log in the SMD folder for details.',
+                f'{APP_SHORT} could not start',
+                f'{APP_NAME} failed to open.\n\n{exc}\n\n'
+                f'See smk_gui.log in the {APP_SHORT} folder for details.',
             )
         except Exception:
             pass

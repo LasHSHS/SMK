@@ -1,4 +1,4 @@
-# Fetch Windows ffmpeg essentials into tools/ffmpeg/ for SMD all-in-one builds.
+# Fetch Windows ffmpeg essentials into tools/ffmpeg/ for SMK all-in-one builds.
 # Usage: powershell -ExecutionPolicy Bypass -File .\scripts\fetch_ffmpeg.ps1
 
 $ErrorActionPreference = 'Stop'

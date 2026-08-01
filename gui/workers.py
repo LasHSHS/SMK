@@ -1,4 +1,4 @@
-"""Background QThread workers used by the SMD desktop GUI."""
+"""Background QThread workers used by the SMK desktop GUI."""
 from __future__ import annotations
 
 import base64
@@ -19,40 +19,14 @@ from PIL import Image
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QPixmap
 
+# Opt-in verbose map/GPS diagnostics (set SMK_DEBUG=1). Keeps the live run
+# dashboard free of internal DEBUG noise for normal users.
+_SMD_DEBUG = os.environ.get("SMD_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
-def _map_base_tile(*, dark: bool) -> str:
-    return "CartoDB.DarkMatter" if dark else "OpenStreetMap"
 
-
-def _add_map_layer_options(m: folium.Map, *, dark: bool) -> None:
-    """Optional basemaps alongside the theme default (street / dark / satellite / terrain)."""
-    if dark:
-        folium.TileLayer(
-            tiles="OpenStreetMap",
-            name="Light map",
-            overlay=False,
-            control=True,
-        ).add_to(m)
-    else:
-        folium.TileLayer(
-            tiles="CartoDB.DarkMatter",
-            name="Dark map",
-            overlay=False,
-            control=True,
-        ).add_to(m)
-    folium.TileLayer(
-        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri',
-        name='Satellite',
-        overlay=False,
-        control=True,
-    ).add_to(m)
-    folium.TileLayer(
-        tiles='OpenTopoMap',
-        name='Terrain',
-        overlay=False,
-        control=True,
-    ).add_to(m)
+def _dbg(msg: str) -> None:
+    if _SMD_DEBUG:
+        print(msg)
 
 
 def _create_themed_map(
@@ -62,20 +36,80 @@ def _create_themed_map(
     dark: bool,
     control_scale: bool = False,
 ) -> folium.Map:
-    """Create a folium map with theme-appropriate default tiles and alternates."""
+    """Create a folium map with theme-appropriate default tiles and alternates.
+
+    Folium TileLayers default to show=True. If several base layers are added
+    that way, LayerControl often leaves the *last* one selected. Build with
+    tiles=None and mark only the theme default as show=True:
+    dark → CartoDB Dark Matter; light → Terrain (OpenTopoMap).
+    """
     m = folium.Map(
         location=location,
         zoom_start=zoom_start,
-        tiles=_map_base_tile(dark=dark),
+        tiles=None,
         control_scale=control_scale,
     )
-    _add_map_layer_options(m, dark=dark)
+    if dark:
+        folium.TileLayer(
+            tiles="CartoDB.DarkMatter",
+            name="CartoDB Dark Matter",
+            overlay=False,
+            control=True,
+            show=True,
+        ).add_to(m)
+        folium.TileLayer(
+            tiles="OpenTopoMap",
+            name="Terrain",
+            overlay=False,
+            control=True,
+            show=False,
+        ).add_to(m)
+        folium.TileLayer(
+            tiles="OpenStreetMap",
+            name="Light map",
+            overlay=False,
+            control=True,
+            show=False,
+        ).add_to(m)
+    else:
+        folium.TileLayer(
+            tiles="OpenTopoMap",
+            name="Terrain",
+            overlay=False,
+            control=True,
+            show=True,
+        ).add_to(m)
+        folium.TileLayer(
+            tiles="OpenStreetMap",
+            name="Light map",
+            overlay=False,
+            control=True,
+            show=False,
+        ).add_to(m)
+        folium.TileLayer(
+            tiles="CartoDB.DarkMatter",
+            name="CartoDB Dark Matter",
+            overlay=False,
+            control=True,
+            show=False,
+        ).add_to(m)
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri',
+        name='Satellite',
+        overlay=False,
+        control=True,
+        show=False,
+    ).add_to(m)
     return m
 
 
-def generate_thumbnail_base64(media_path, max_size=150):
-    """Base64 thumbnail for map popups (photo or video). Thread-safe:
-    pure PIL/ffmpeg, no Qt objects, unique temp files per call."""
+def generate_thumbnail_base64(media_path, max_size=180):
+    """Base64 thumbnail for map hover previews (photo or video). Thread-safe:
+    pure PIL/ffmpeg, no Qt objects, unique temp files per call.
+
+    Default 180px matches the tooltip CSS max size (~20% above the old 150).
+    """
     path = Path(media_path)
     try:
         if path.suffix.lower() in ('.mp4', '.mov', '.m4v', '.mkv', '.avi'):
@@ -98,8 +132,8 @@ def generate_thumbnail_base64(media_path, max_size=150):
         return None
 
 
-def _video_frame_thumbnail_b64(video_path: Path, max_size: int = 150):
-    """Extract one frame with ffmpeg for map popup."""
+def _video_frame_thumbnail_b64(video_path: Path, max_size: int = 180):
+    """Extract one frame with ffmpeg for map hover preview."""
     import uuid
 
     from smd.ffmpeg_bundle import resolve_ffmpeg
@@ -153,6 +187,10 @@ class MapRenderWorker(QThread):
         self.locations = locations
         self.thumbnails = thumbnails or {}
         self.dark_mode = dark_mode
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
 
     def _thumbnail_for(self, full_path: str):
         """Cached thumbnail lookup; generates in this worker thread on miss."""
@@ -166,6 +204,9 @@ class MapRenderWorker(QThread):
         try:
             from collections import defaultdict
             
+            if self.cancelled:
+                self.error.emit('Map rendering cancelled by user')
+                return
             self.progress.emit(5, 'Building marker groups...')
             
             try:
@@ -174,7 +215,7 @@ class MapRenderWorker(QThread):
                 center_lat = latest_location['coords'][0]
                 center_lon = latest_location['coords'][1]
             except (ValueError, IndexError, KeyError) as e:
-                print(f"DEBUG: Error finding map center: {e}")
+                _dbg(f"DEBUG: Error finding map center: {e}")
                 # Default to center of US
                 center_lat, center_lon = 39.8283, -98.5795
             
@@ -189,7 +230,7 @@ class MapRenderWorker(QThread):
                     control_scale=True,
                 )
             except Exception as e:
-                print(f"DEBUG: Error creating folium map: {e}")
+                _dbg(f"DEBUG: Error creating folium map: {e}")
                 self.error.emit(f'Failed to create map: {str(e)}')
                 return
             
@@ -203,7 +244,7 @@ class MapRenderWorker(QThread):
                     show=True
                 ).add_to(m)
             except Exception as e:
-                print(f"DEBUG: Error creating marker cluster: {e}")
+                _dbg(f"DEBUG: Error creating marker cluster: {e}")
                 marker_cluster = None
                 self.error.emit(f'Warning: Could not create marker cluster: {str(e)}')
             
@@ -216,16 +257,16 @@ class MapRenderWorker(QThread):
                         coord_key = (round(loc['coords'][0], 5), round(loc['coords'][1], 5))
                         grouped_locations[coord_key].append(loc)
                     except (KeyError, TypeError) as e:
-                        print(f"DEBUG: Error processing location: {e}, loc: {loc}")
+                        _dbg(f"DEBUG: Error processing location: {e}, loc: {loc}")
                         continue
             except Exception as e:
-                print(f"DEBUG: Error grouping locations: {e}")
+                _dbg(f"DEBUG: Error grouping locations: {e}")
                 self.error.emit(f'Error processing locations: {str(e)}')
                 return
             
             total_groups = len(grouped_locations)
             if total_groups == 0:
-                print("DEBUG: No locations to display on map")
+                _dbg("DEBUG: No locations to display on map")
                 self.error.emit('No valid locations found to display on map')
                 return
             
@@ -236,11 +277,28 @@ class MapRenderWorker(QThread):
             
             for coord_key, loc_group in grouped_locations.items():
                 try:
+                    if self.cancelled:
+                        self.error.emit('Map rendering cancelled by user')
+                        return
                     current_group += 1
                     progress_val = 30 + int((current_group / total_groups) * 60)
                     self.progress.emit(progress_val, f'📌 Adding markers ({current_group}/{total_groups})...')
                     
+                    # Prefer a video as the pin face when a photo+video share GPS
+                    # (common for Snapchat paired memories at the same spot).
+                    loc_group = sorted(
+                        loc_group,
+                        key=lambda loc: (0 if loc.get('type') == 'video' else 1, loc.get('filename') or ''),
+                    )
                     primary_loc = loc_group[0]
+                    path_list = [
+                        {
+                            'path': Path(loc['full_path']).as_posix(),
+                            'name': loc['filename'],
+                            'type': loc.get('type') or '',
+                        }
+                        for loc in loc_group
+                    ]
                     
                     # Thumbnails generated here in the worker thread (pure PIL/ffmpeg, no Qt).
                     thumbnail_b64 = None
@@ -250,92 +308,86 @@ class MapRenderWorker(QThread):
                             if thumbnail_b64:
                                 break
                         except Exception as thumb_err:
-                            print(f"DEBUG: Error generating thumbnail: {thumb_err}")
+                            _dbg(f"DEBUG: Error generating thumbnail: {thumb_err}")
                     
-                    # Create popup HTML
-                    try:
-                        file_list = '<br>'.join([f"• {html.escape(loc['filename'])}" for loc in loc_group[:10]])
-                        if len(loc_group) > 10:
-                            file_list += f"<br>• ... and {len(loc_group) - 10} more"
-                        
-                        safe_file_path = primary_loc['full_path'].replace('\\', '/').replace("'", "\\'").replace('"', '\\"')
-                        thumb_html = ""
-                        if thumbnail_b64:
-                            thumb_html = f'<img src="{thumbnail_b64}" style="max-width:180px;max-height:120px;border-radius:4px;margin-bottom:6px;"><br>'
-
-                        popup_html = f"""
-                            <div style="min-width:200px; max-width:300px;" data-filepath="{safe_file_path}">
-                                {thumb_html}
-                                <b style="font-size:14px;">{len(loc_group)} file(s) at this location</b><br>
-                                <div style="margin-top:8px; max-height:120px; overflow-y:auto; font-size:11px;">
-                                    {file_list}
-                                </div>
-                                <small style="color:#999; margin-top:5px; display:block; font-size:10px;">
-                                    📍 {primary_loc['coords'][0]:.6f}, {primary_loc['coords'][1]:.6f}
-                                </small>
-                            </div>
-                        """
-                    except Exception as popup_err:
-                        print(f"DEBUG: Error creating popup HTML: {popup_err}")
-                        popup_html = f"""
-                            <div style="min-width:200px; max-width:300px;">
-                                <b>{len(loc_group)} file(s) at this location</b>
-                            </div>
-                        """
-                    
-                    # Create tooltip
+                    # Hover preview only (no click popup — click opens media via JS).
                     try:
                         safe_filename = html.escape(primary_loc['filename'])
+                        n_img = sum(1 for loc in loc_group if loc.get('type') == 'image')
+                        n_vid = sum(1 for loc in loc_group if loc.get('type') == 'video')
+                        if n_img and n_vid:
+                            mix_label = f"{n_vid} video(s) · {n_img} photo(s) · click cycles"
+                        elif n_vid:
+                            mix_label = (
+                                f"{n_vid} video(s) · click to open"
+                                if n_vid == 1
+                                else f"{n_vid} videos · click cycles"
+                            )
+                        else:
+                            mix_label = (
+                                f"{n_img} photo(s) · click to open"
+                                if n_img == 1
+                                else f"{n_img} photos · click cycles"
+                            )
+                        lat, lon = primary_loc['coords']
+                        coord_label = html.escape(f"{lat:.6f}, {lon:.6f}")
                         if thumbnail_b64:
                             tooltip_html = f"""
-                            <div style="text-align:center; background:white; padding:5px; border-radius:5px;">
-                                <img src="{thumbnail_b64}" style="max-width:150px; max-height:150px; border-radius:3px;"><br>
-                                <small style="color:#333; margin-top:3px; display:block;"><b>{safe_filename}</b></small>
-                                <small style="color:#666; font-size:9px;">{len(loc_group)} file(s) here</small>
+                            <div style="text-align:center; background:white; padding:8px; border-radius:6px; min-width:180px;">
+                                <img src="{thumbnail_b64}" style="max-width:180px; max-height:180px; border-radius:4px;"><br>
+                                <div style="color:#222; margin-top:6px; font-size:13px; font-weight:700;">{safe_filename}</div>
+                                <div style="color:#444; margin-top:3px; font-size:12px;">
+                                    📍 {coord_label}
+                                </div>
+                                <div style="color:#666; margin-top:2px; font-size:11px;">
+                                    {html.escape(mix_label)}
+                                </div>
                             </div>
                             """
                             tooltip = folium.Tooltip(tooltip_html, sticky=True)
                         else:
-                            tooltip_text = f"{len(loc_group)} files: {safe_filename}"
-                            tooltip = folium.Tooltip(tooltip_text, sticky=True)
+                            tooltip = folium.Tooltip(
+                                f"{safe_filename}<br>📍 {coord_label}<br>{html.escape(mix_label)}",
+                                sticky=True,
+                            )
                     except Exception as tooltip_err:
-                        print(f"DEBUG: Error creating tooltip: {tooltip_err}")
-                        tooltip = folium.Tooltip(f"{len(loc_group)} files at location", sticky=True)
+                        _dbg(f"DEBUG: Error creating tooltip: {tooltip_err}")
+                        tooltip = folium.Tooltip("Click to open", sticky=True)
                     
-                    # Add marker
                     try:
+                        # smdPaths is embedded in Leaflet marker options so click
+                        # still works after MarkerCluster spiderfy moves the pin
+                        # (coordinate lookup alone opened the neighbor).
                         folium.Marker(
                             location=primary_loc['coords'],
-                            popup=folium.Popup(popup_html, max_width=350),
                             tooltip=tooltip,
                             icon=folium.Icon(
                                 color='red' if primary_loc.get('type') == 'image' else 'blue',
                                 icon='camera' if primary_loc.get('type') == 'image' else 'video-camera',
                                 prefix='fa'
-                            )
+                            ),
+                            smdPaths=json.dumps(path_list),
                         ).add_to(marker_cluster if marker_cluster else m)
                     except Exception as marker_err:
-                        print(f"DEBUG: Error adding marker: {marker_err}")
-                        # Skip this marker but continue
+                        _dbg(f"DEBUG: Error adding marker: {marker_err}")
                         pass
                     
-                    # Store file data for click handling
                     try:
                         coord_str = f"{coord_key[0]:.5f},{coord_key[1]:.5f}"
-                        all_files_json[coord_str] = [{'path': loc['full_path'], 'name': loc['filename']} for loc in loc_group]
+                        all_files_json[coord_str] = path_list
                     except Exception as data_err:
-                        print(f"DEBUG: Error storing file data: {data_err}")
+                        _dbg(f"DEBUG: Error storing file data: {data_err}")
                         pass
                 
                 except Exception as e:
-                    print(f"DEBUG: Error processing marker group: {e}")
+                    _dbg(f"DEBUG: Error processing marker group: {e}")
                     continue
             
             try:
                 self.progress.emit(92, '🔗 Adding layer controls...')
                 folium.LayerControl().add_to(m)
             except Exception as e:
-                print(f"DEBUG: Error adding layer controls: {e}")
+                _dbg(f"DEBUG: Error adding layer controls: {e}")
                 pass
             
             try:
@@ -343,28 +395,22 @@ class MapRenderWorker(QThread):
                 
                 # Add JavaScript with file data
                 all_files_json_str = json.dumps(all_files_json)
-                from smd.theme import LIGHT_SECONDARY, LIGHT_SECONDARY_HOVER
+                from smd.theme import LIGHT_SECONDARY
 
                 custom_js = f"""
                 <script>
                 window.fileData = {all_files_json_str};
                 
                 window.addEventListener('resize', function() {{
-                    if (typeof map !== 'undefined') {{
-                        map.invalidateSize();
+                    if (typeof L === 'undefined') return;
+                    for (var key in window) {{
+                        try {{
+                            if (window[key] instanceof L.Map) window[key].invalidateSize();
+                        }} catch (err) {{}}
                     }}
                 }});
                 </script>
                 <style>
-                .leaflet-popup-content {{
-                    margin: 13px 19px;
-                    line-height: 1.4;
-                }}
-                .leaflet-popup-content button:hover {{
-                    background-color: {LIGHT_SECONDARY_HOVER} !important;
-                    transform: scale(1.02);
-                    transition: all 0.2s;
-                }}
                 .leaflet-tooltip {{
                     background-color: rgba(255, 255, 255, 0.95);
                     border: 2px solid {LIGHT_SECONDARY};
@@ -372,11 +418,14 @@ class MapRenderWorker(QThread):
                     padding: 8px;
                     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                 }}
+                .leaflet-marker-icon {{
+                    cursor: pointer;
+                }}
                 </style>
                 """
                 m.get_root().html.add_child(folium.Element(custom_js))
             except Exception as e:
-                print(f"DEBUG: Error adding custom JavaScript: {e}")
+                _dbg(f"DEBUG: Error adding custom JavaScript: {e}")
                 pass
             
             try:
@@ -386,60 +435,105 @@ class MapRenderWorker(QThread):
                 temp_path = temp_file.name
                 temp_file.close()
                 
+                if self.cancelled:
+                    self.error.emit('Map rendering cancelled by user')
+                    return
+
                 m.save(temp_path)
                 
-                print(f"DEBUG: Map saved to {temp_path}")
+                _dbg(f"DEBUG: Map saved to {temp_path}")
                 
-                # Inject JavaScript for auto-opening files
+                # Click marker → open media (hover tooltip stays; no popup).
                 try:
                     with open(temp_path, 'r', encoding='utf-8') as f:
                         html_content = f.read()
                     
-                    # Add script before closing body tag
-                    auto_open_script = """
+                    click_open_script = """
                     <script>
-                    // Auto-open file when a marker's popup opens
-                    document.addEventListener('DOMContentLoaded', function() {
-                        if (typeof map !== 'undefined') {
-                            map.on('popupopen', function(e) {
-                                try {
-                                    var content = e.popup.getContent();
-                                    var div = document.createElement('div');
-                                    div.innerHTML = content;
-                                    var target = div.querySelector('div[data-filepath]');
-                                    if (target) {
-                                        var filepath = target.getAttribute('data-filepath');
-                                        if (filepath) {
-                                            console.log('Auto-opening file:', filepath);
-                                            window.pyOpenFile = filepath;
-                                        }
-                                    }
-                                } catch (err) {
-                                    console.log('popupopen handler error', err);
+                    (function() {
+                        function filesFromMarker(marker) {
+                            if (!marker || !marker.options) return null;
+                            var raw = marker.options.smdPaths;
+                            if (!raw) return null;
+                            try {
+                                var parsed = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+                                return (parsed && parsed.length) ? parsed : null;
+                            } catch (err) { return null; }
+                        }
+                        function pathForLatLng(lat, lng) {
+                            // Legacy fallback only — prefer marker.options.smdPaths.
+                            if (!window.fileData) return null;
+                            var key = Number(lat).toFixed(5) + ',' + Number(lng).toFixed(5);
+                            var files = window.fileData[key];
+                            if (files && files.length && files[0].path) return files[0].path;
+                            return null;
+                        }
+                        function bindMarker(marker) {
+                            if (!marker || !(marker instanceof L.Marker) || marker._smdClickBound) return;
+                            marker._smdClickBound = true;
+                            marker.on('click', function(e) {
+                                if (e && e.originalEvent) {
+                                    L.DomEvent.stopPropagation(e.originalEvent);
                                 }
+                                var files = filesFromMarker(marker);
+                                var filepath = null;
+                                if (files && files.length) {
+                                    var idx = marker._smdOpenIdx || 0;
+                                    if (idx >= files.length) idx = 0;
+                                    filepath = files[idx].path;
+                                    marker._smdOpenIdx = (idx + 1) % files.length;
+                                } else {
+                                    var ll = marker.getLatLng();
+                                    filepath = pathForLatLng(ll.lat, ll.lng);
+                                }
+                                if (filepath) window.pyOpenFile = filepath;
                             });
                         }
-                    });
+                        function walkLayer(layer) {
+                            if (!layer) return;
+                            bindMarker(layer);
+                            if (typeof layer.eachLayer === 'function') {
+                                layer.eachLayer(walkLayer);
+                            }
+                        }
+                        function attach(map) {
+                            if (!map || map._smdClickBound) return;
+                            map._smdClickBound = true;
+                            walkLayer(map);
+                            map.on('layeradd', function(e) { walkLayer(e.layer); });
+                        }
+                        function bindAllMaps() {
+                            if (typeof L === 'undefined' || !L.Map) return;
+                            for (var key in window) {
+                                try {
+                                    if (window[key] instanceof L.Map) attach(window[key]);
+                                } catch (err) {}
+                            }
+                        }
+                        document.addEventListener('DOMContentLoaded', function() {
+                            bindAllMaps();
+                            setTimeout(bindAllMaps, 400);
+                            setTimeout(bindAllMaps, 1200);
+                        });
+                    })();
                     </script>
                     """
-                    html_content = html_content.replace('</body>', auto_open_script + '</body>')
+                    html_content = html_content.replace('</body>', click_open_script + '</body>')
                     
                     with open(temp_path, 'w', encoding='utf-8') as f:
                         f.write(html_content)
-                    
-                    print("DEBUG: Auto-open JavaScript injected into map HTML")
                 except Exception as inject_err:
-                    print(f"WARNING: Could not inject auto-open JavaScript: {inject_err}")
+                    print(f"WARNING: Could not inject marker-click JavaScript: {inject_err}")
                 
                 self.progress.emit(100, 'Map rendered!')
                 self.finished.emit(temp_path)
             except Exception as save_err:
-                print(f"DEBUG: Error saving map: {save_err}")
+                _dbg(f"DEBUG: Error saving map: {save_err}")
                 self.error.emit(f'Failed to save map: {str(save_err)}')
                 return
             
         except Exception as e:
-            print(f"DEBUG: Unexpected error in MapRenderWorker: {e}")
+            _dbg(f"DEBUG: Unexpected error in MapRenderWorker: {e}")
             import traceback
             traceback.print_exc()
             self.error.emit(f'Unexpected error rendering map: {str(e)}')
@@ -622,7 +716,11 @@ class MapWorker(QThread):
             actual_type = ScanWorker.detect_file_type(file_path)
             extension_mismatch = not extension_matches_magic(suffix, actual_type)
 
+        from smd.file_checker_report import parse_filename_date_ymd, parse_filename_date_year
+
         file_size = file_path.stat().st_size
+        date_ymd = parse_filename_date_ymd(file_path.name)
+        date_year = parse_filename_date_year(file_path.name)
         base = {
             'filename': file_path.name,
             'path': file_path.as_posix(),
@@ -633,11 +731,47 @@ class MapWorker(QThread):
             'gps_source': gps_source,
             'extension_mismatch': extension_mismatch,
             'dimensions': dimensions,
+            'date_year': date_year,
+            'date_ymd': date_ymd,
         }
         if coords:
             base['coords'] = coords
             base['gps_source'] = gps_source
         return base
+
+    def _build_scan_report(
+        self,
+        *,
+        total_images: int,
+        total_videos: int,
+        file_types: dict,
+        extension_mismatches: int,
+        resolution_counts: dict,
+        gps_embedded: dict,
+        gps_json: dict,
+        gps_missing: dict,
+        with_date: int,
+        without_date: int,
+        no_gps_years: dict,
+        date_earliest: str | None,
+        date_latest: str | None,
+    ) -> dict:
+        return {
+            'total_media': total_images + total_videos,
+            'total_images': total_images,
+            'total_videos': total_videos,
+            'file_types': file_types,
+            'extension_mismatches': extension_mismatches,
+            'resolution_counts': resolution_counts,
+            'gps_embedded': gps_embedded,
+            'gps_json': gps_json,
+            'gps_missing': gps_missing,
+            'with_date': with_date,
+            'without_date': without_date,
+            'no_gps_years': dict(no_gps_years),
+            'date_earliest': date_earliest,
+            'date_latest': date_latest,
+        }
     
     def run(self):
         try:
@@ -649,7 +783,7 @@ class MapWorker(QThread):
                     from smd.map_gps import build_json_coord_lookup
                     from smd.utils import load_memories
 
-                    print(f"DEBUG: MapWorker loading JSON: {self.json_path}")
+                    _dbg(f"DEBUG: MapWorker loading JSON: {self.json_path}")
                     memories = load_memories(Path(self.json_path))
                     self.json_coords_lookup = build_json_coord_lookup(memories)
                 except Exception as e:
@@ -679,9 +813,13 @@ class MapWorker(QThread):
             gps_embedded = {'image': 0, 'video': 0}
             gps_json = {'image': 0, 'video': 0}
             gps_missing = {'image': 0, 'video': 0}
+            with_date = 0
+            without_date = 0
+            no_gps_years: dict[str, int] = {}
+            date_earliest: str | None = None
+            date_latest: str | None = None
             processed = 0
             start_time = time.time()
-            last_progress_time = start_time
             
             # Adaptive threading from system profile (GPS scan)
             cpu_count = os.cpu_count() or 2
@@ -712,19 +850,24 @@ class MapWorker(QThread):
                     for future in as_completed(future_to_file):
                         if self.cancelled:
                             executor.shutdown(wait=False, cancel_futures=True)
+                            self.scan_report = self._build_scan_report(
+                                total_images=total_images,
+                                total_videos=total_videos,
+                                file_types=file_types,
+                                extension_mismatches=extension_mismatches,
+                                resolution_counts=resolution_counts,
+                                gps_embedded=gps_embedded,
+                                gps_json=gps_json,
+                                gps_missing=gps_missing,
+                                with_date=with_date,
+                                without_date=without_date,
+                                no_gps_years=no_gps_years,
+                                date_earliest=date_earliest,
+                                date_latest=date_latest,
+                            )
+                            # Error only — do not also emit finished (that used to
+                            # start map rendering after Cancel).
                             self.error.emit('Scan cancelled by user')
-                            self.scan_report = {
-                                'total_media': total_images + total_videos,
-                                'total_images': total_images,
-                                'total_videos': total_videos,
-                                'file_types': file_types,
-                                'extension_mismatches': extension_mismatches,
-                                'resolution_counts': resolution_counts,
-                                'gps_embedded': gps_embedded,
-                                'gps_json': gps_json,
-                                'gps_missing': gps_missing,
-                            }
-                            self.finished.emit(locations, total_images, total_videos)
                             return
                         
                         file_path = future_to_file[future]
@@ -757,6 +900,18 @@ class MapWorker(QThread):
                                 res_key = f"{dims[0]}x{dims[1]}"
                                 resolution_counts[res_key] = resolution_counts.get(res_key, 0) + 1
 
+                            date_year = result.get('date_year')
+                            date_ymd = result.get('date_ymd')
+                            if date_year is not None:
+                                with_date += 1
+                            else:
+                                without_date += 1
+                            if date_ymd:
+                                if date_earliest is None or date_ymd < date_earliest:
+                                    date_earliest = date_ymd
+                                if date_latest is None or date_ymd > date_latest:
+                                    date_latest = date_ymd
+
                             file_modified = datetime.fromtimestamp(result['modified'])
                             metadata = {
                                 'size': file_size,
@@ -772,6 +927,8 @@ class MapWorker(QThread):
                                 gps_json[file_type] += 1
                             else:
                                 gps_missing[file_type] += 1
+                                year_key = str(date_year) if date_year is not None else 'unknown'
+                                no_gps_years[year_key] = no_gps_years.get(year_key, 0) + 1
 
                             if 'coords' in result:
                                 locations.append(result)
@@ -818,17 +975,21 @@ class MapWorker(QThread):
                         # High-end system but slow processing = likely I/O bottleneck
                         pass  # Continue with current settings
             
-            self.scan_report = {
-                'total_media': total_images + total_videos,
-                'total_images': total_images,
-                'total_videos': total_videos,
-                'file_types': file_types,
-                'extension_mismatches': extension_mismatches,
-                'resolution_counts': resolution_counts,
-                'gps_embedded': gps_embedded,
-                'gps_json': gps_json,
-                'gps_missing': gps_missing,
-            }
+            self.scan_report = self._build_scan_report(
+                total_images=total_images,
+                total_videos=total_videos,
+                file_types=file_types,
+                extension_mismatches=extension_mismatches,
+                resolution_counts=resolution_counts,
+                gps_embedded=gps_embedded,
+                gps_json=gps_json,
+                gps_missing=gps_missing,
+                with_date=with_date,
+                without_date=without_date,
+                no_gps_years=no_gps_years,
+                date_earliest=date_earliest,
+                date_latest=date_latest,
+            )
             self.finished.emit(locations, total_images, total_videos)
         except Exception as e:
             self.error.emit(str(e))
@@ -882,16 +1043,43 @@ class DuplicateScanWorker(QThread):
             self.error.emit(str(exc))
 
 
+class VisualDuplicateScanWorker(QThread):
+    """Decode every file in merged/ to find same-content duplicates that differ
+    at the byte level (e.g. a memory Snapchat itself exported twice). Much slower
+    than DuplicateScanWorker - runs off the UI thread with periodic progress since
+    a large library can take several minutes."""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+
+    def __init__(self, paths):
+        super().__init__()
+        self.paths = paths
+
+    def run(self):
+        try:
+            from smd.duplicates import scan_visual_duplicates
+
+            report = scan_visual_duplicates(
+                self.paths,
+                status_callback=self.progress.emit,
+            )
+            self.finished.emit(report)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class StagingVerifyWorker(QThread):
     """Runs the post-run staging integrity check off the UI thread.
 
     check_staging_readiness() ffprobes *every* video by design (an earlier
     fix traded a 25-file sample for full certainty before staging/ gets
     deleted) - for a library with thousands of videos that can take minutes,
-    and running it directly on the GUI thread made SMD look frozen right
+    and running it directly on the GUI thread made SMK look frozen right
     after a run finished, even though every file was already saved safely."""
     finished_ok = pyqtSignal(object)
     error = pyqtSignal(str)
+    progress = pyqtSignal(int, int)
 
     def __init__(self, account_dir, paths, require_raw):
         super().__init__()
@@ -904,7 +1092,10 @@ class StagingVerifyWorker(QThread):
             from smd.staging_check import check_staging_readiness
 
             readiness = check_staging_readiness(
-                self.account_dir, layout=self.paths, require_raw=self.require_raw
+                self.account_dir,
+                layout=self.paths,
+                require_raw=self.require_raw,
+                progress_callback=lambda cur, tot: self.progress.emit(cur, tot),
             )
             self.finished_ok.emit(readiness)
         except Exception as exc:
@@ -919,14 +1110,14 @@ class CompletionFinalizeWorker(QThread):
     on the GUI thread right after StagingVerifyWorker returns."""
     finished_ok = pyqtSignal(object)
     error = pyqtSignal(str)
+    progress = pyqtSignal(int, int)
 
-    def __init__(self, paths, stats, keep_raw, readiness, skipped_by_setting, *, success=True):
+    def __init__(self, paths, stats, keep_raw, readiness, *, success=True):
         super().__init__()
         self.paths = paths
         self.stats = stats
         self.keep_raw = keep_raw
         self.readiness = readiness
-        self.skipped_by_setting = skipped_by_setting
         self.success = success
 
     def run(self):
@@ -935,19 +1126,19 @@ class CompletionFinalizeWorker(QThread):
             from smd.session_report import build_session_report, save_session_report
             from smd.staging_check import delete_staging_folder
 
+            # Remap finalize into the last stretch of stage 6 (verify already
+            # filled most of the bar); keep the stage bar moving to 100%.
+            self.progress.emit(85, 100)
             staging_deleted = False
             staging_freed = ""
-            if (
-                not self.skipped_by_setting
-                and self.readiness is not None
-                and self.readiness.safe_to_delete
-            ):
+            if self.readiness is not None and self.readiness.safe_to_delete:
                 ok, _msg = delete_staging_folder(
                     self.paths.account_dir, report=self.readiness, layout=self.paths
                 )
                 if ok:
                     staging_deleted = True
                     staging_freed = format_bytes(self.readiness.staging_bytes)
+            self.progress.emit(92, 100)
 
             report = build_session_report(
                 self.paths.account_dir,
@@ -958,9 +1149,9 @@ class CompletionFinalizeWorker(QThread):
                 staging_freed=staging_freed,
                 layout=self.paths,
                 readiness=self.readiness,
-                skip_staging_check=self.skipped_by_setting,
             )
             save_session_report(self.paths, report)
+            self.progress.emit(100, 100)
             self.finished_ok.emit(report)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -1177,6 +1368,8 @@ class LocalExportWorker(QThread):
     finished = pyqtSignal(int)
     output = pyqtSignal(str)
     progress = pyqtSignal(int, int)
+    # stage_num, stage_total, title — always consumed by the Progress section
+    stage = pyqtSignal(int, int, str)
 
     def __init__(
         self,
@@ -1189,6 +1382,7 @@ class LocalExportWorker(QThread):
         performance_mode="balanced",
         zip_paths=None,
         paths=None,
+        auto_delete_duplicates=True,
     ):
         super().__init__()
         self.seed_path = Path(seed_path)
@@ -1200,6 +1394,7 @@ class LocalExportWorker(QThread):
         self.repair_videos = repair_videos
         self.performance_mode = performance_mode
         self.zip_paths = [Path(p) for p in zip_paths] if zip_paths else None
+        self.auto_delete_duplicates = bool(auto_delete_duplicates)
         self.limit = 0
         self._should_cancel = False
 
@@ -1210,7 +1405,11 @@ class LocalExportWorker(QThread):
     def run(self):
         import re
         import threading
-        from smd.local_pipeline import process_bundled_export
+        from smd.local_pipeline import (
+            SMD_PROGRESS_MARKER,
+            SMD_STAGE_MARKER,
+            process_bundled_export,
+        )
         from smd.account_layout import resolve_account_paths
 
         paths = self.paths or resolve_account_paths(self.account_dir, migrate=True)
@@ -1222,7 +1421,9 @@ class LocalExportWorker(QThread):
             while self._heartbeat_running and not self._should_cancel:
                 time.sleep(10)
                 if self._last_status:
-                    self.output.emit(f"⏳ Still working… {self._last_status}")
+                    # Echo the live status so the log stays descriptive (not
+                    # just "still working") while a long step has no new lines.
+                    self.output.emit(f"⏳ Still on this step… {self._last_status}")
 
         threading.Thread(target=heartbeat, daemon=True).start()
 
@@ -1238,9 +1439,28 @@ class LocalExportWorker(QThread):
             )
 
             checkpoint = paths.checkpoint_path
+            stage_prefix = f"{SMD_STAGE_MARKER}|"
+            progress_prefix = f"{SMD_PROGRESS_MARKER}|"
 
             def status_callback(msg):
                 self._last_status = msg
+                if msg.startswith(stage_prefix):
+                    parts = msg.split("|", 3)
+                    if len(parts) == 4:
+                        try:
+                            self.stage.emit(int(parts[1]), int(parts[2]), parts[3])
+                        except ValueError:
+                            pass
+                    self.output.emit(parts[3] if len(parts) == 4 else msg)
+                    return
+                if msg.startswith(progress_prefix):
+                    parts = msg.split("|", 2)
+                    if len(parts) == 3:
+                        try:
+                            self.progress.emit(int(parts[1]), int(parts[2]))
+                        except ValueError:
+                            pass
+                    return
                 m = re.search(r"Processing (\d+)/(\d+)", msg)
                 if m:
                     current = int(m.group(1))
@@ -1249,10 +1469,26 @@ class LocalExportWorker(QThread):
                     # Log every 25 files to avoid flooding Qt (was crashing GUI)
                     if current <= 3 or current % 25 == 0:
                         self.output.emit(msg)
-                elif msg.startswith("⏳"):
-                    pass  # heartbeat handled separately
-                else:
+                    return
+                m = re.search(
+                    r"(?:Checking for duplicate files|Checking possible identical duplicates|"
+                    r"Checking duplicates \(look-alikes\):.*|"
+                    r"Duplicate check \(look-alikes\):.*|Same-content scan:.*|"
+                    r"Deep scan:.*|Removing duplicate staged copies.*)\((\d+)/(\d+)\)",
+                    msg,
+                )
+                if m:
+                    self.progress.emit(int(m.group(1)), int(m.group(2)))
                     self.output.emit(msg)
+                    return
+                m = re.search(r"Extracting ZIP (\d+)/(\d+):", msg)
+                if m:
+                    self.progress.emit(int(m.group(1)), int(m.group(2)))
+                    self.output.emit(msg)
+                    return
+                if msg.startswith("⏳"):
+                    return  # heartbeat handled separately
+                self.output.emit(msg)
 
             stats = process_bundled_export(
                 self.seed_path,
@@ -1271,8 +1507,11 @@ class LocalExportWorker(QThread):
                 ffmpeg_threads=settings.ffmpeg_threads,
                 zip_paths=self.zip_paths,
                 layout=paths,
+                auto_delete_duplicates=self.auto_delete_duplicates,
             )
             self.run_stats = stats
+            if getattr(stats, "stopped_by_user", False):
+                self._should_cancel = True
             for line in stats.summary_lines():
                 self.output.emit(line)
             self.finished.emit(0 if not self._should_cancel else 1)

@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-SMD all-in-one Windows build (portable folder).
+SMK all-in-one Windows build (portable folder).
 
 Includes: Python runtime, PyQt5 + WebEngine, ffmpeg, folium assets.
-End users run dist/smd/SMD.exe — no Python, pip, or separate tool installs.
+End users run dist/smd/SMK.exe — no Python, pip, or separate tool installs.
 """
 from pathlib import Path
 
@@ -104,7 +104,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='SMD',
+    name='SMK',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

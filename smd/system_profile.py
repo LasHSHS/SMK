@@ -19,13 +19,9 @@ PERF_MODES = ("maximum", "balanced", "conservative")
 PERF_FRACTIONS = {"maximum": 0.8, "balanced": 0.6, "conservative": 0.4}
 
 MODE_LABELS = {
-
-    "maximum": "Maximum (use all power)",
-
-    "balanced": "Balanced (smooth PC use)",
-
-    "conservative": "Eco (background friendly)",
-
+    "maximum": "Maximum - fastest (more power)",
+    "balanced": "Balanced - light multitasking OK",
+    "conservative": "Eco - easier multitasking / battery",
 }
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Snapchat Memories Downloader (SMD) - CLI backend
+Snapchat Memories Keeper (SMK) - CLI backend
 
 Processes a bundled Snapchat data export (media inside the ZIP) fully offline:
 extracts media, merges overlays, embeds timestamps and GPS metadata.
@@ -25,7 +25,7 @@ if sys.platform == 'win32':
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Snapchat Memories Downloader - offline bundled export processor"
+        description="Snapchat Memories Keeper - offline bundled export processor"
     )
     parser.add_argument(
         "export",

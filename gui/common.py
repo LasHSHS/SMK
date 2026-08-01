@@ -1,4 +1,4 @@
-"""Shared constants and helpers for the SMD desktop GUI."""
+"""Shared constants and helpers for the SMK desktop GUI."""
 from __future__ import annotations
 
 import os
@@ -60,11 +60,40 @@ def build_help_panel() -> QWidget:
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(0)
 
-    from smd.help_content import build_help_html
+    from smd.help_content import build_help_html, inject_title_rule_image
+    from smd.theme import palette
 
+    accent = palette(True)["secondary"]
     browser = DocBrowser()
+    browser.setObjectName("helpDocBrowser")
     browser.setOpenExternalLinks(False)
-    browser.setHtml(build_help_html(TAB_SAVE_MEMORIES))
+    # Theme sync rebuilds with live accent; seed dark secondary for first paint.
+    browser.setHtml(build_help_html(TAB_SAVE_MEMORIES, accent=accent))
+    inject_title_rule_image(browser, accent)
+    browser.anchorClicked.connect(lambda url: _doc_browser_anchor_clicked(browser, url))
+    lay.addWidget(browser, 1)
+    return panel
+
+
+def build_palestine_panel() -> QWidget:
+    """Palestine tab - solidarity framing and external resource links."""
+    from gui.widgets import DocBrowser
+
+    panel = QWidget()
+    lay = QVBoxLayout(panel)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(0)
+
+    from smd.help_content import inject_title_rule_image
+    from smd.palestine_content import build_palestine_html
+    from smd.theme import palette
+
+    accent = palette(True)["secondary"]
+    browser = DocBrowser()
+    browser.setObjectName("palestineDocBrowser")
+    browser.setOpenExternalLinks(False)
+    browser.setHtml(build_palestine_html(accent=accent))
+    inject_title_rule_image(browser, accent)
     browser.anchorClicked.connect(lambda url: _doc_browser_anchor_clicked(browser, url))
     lay.addWidget(browser, 1)
     return panel
@@ -80,9 +109,16 @@ def build_about_panel() -> QWidget:
     lay.setSpacing(0)
 
     from smd.about_content import build_about_html
+    from smd.help_content import inject_title_rule_image
+    from smd.theme import palette
 
+    accent = palette(True)["secondary"]
     browser = DocBrowser()
-    browser.setHtml(build_about_html(web_engine_available=WEB_ENGINE_AVAILABLE))
+    browser.setObjectName("aboutDocBrowser")
+    browser.setHtml(
+        build_about_html(web_engine_available=WEB_ENGINE_AVAILABLE, accent=accent)
+    )
+    inject_title_rule_image(browser, accent)
     browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
     lay.addWidget(browser, 1)
     return panel
@@ -91,6 +127,7 @@ def build_about_panel() -> QWidget:
 def build_guide_panel(go_to_process_cb) -> QWidget:
     """Single-column guide: outer scroll only, text and screenshots stacked vertically."""
     from smd.guide_content import build_guide_html, guide_assets_dir
+    from smd.help_content import inject_title_rule_image
 
     from gui.widgets import FlowDocBrowser
 
@@ -99,9 +136,15 @@ def build_guide_panel(go_to_process_cb) -> QWidget:
     lay.setSpacing(12)
     lay.setContentsMargins(0, 0, 0, 0)
 
+    from smd.theme import palette
+
+    accent = palette(True)["secondary"]
     browser = FlowDocBrowser()
+    browser.setObjectName('guideDocBrowser')
     browser.setSearchPaths([str(guide_assets_dir())])
-    browser.setHtml(build_guide_html(TAB_SAVE_MEMORIES))
+    # Theme sync rebuilds this with the live accent; seed dark secondary for first paint.
+    browser.setHtml(build_guide_html(TAB_SAVE_MEMORIES, accent=accent))
+    inject_title_rule_image(browser, accent)
     browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
 
     go_btn = QPushButton(f"Go to {TAB_SAVE_MEMORIES}")
@@ -161,9 +204,9 @@ def configure_webengine_storage() -> None:
 
 
 def startup_log(message: str) -> None:
-    """Append startup diagnostics to smd_gui.log (works under pythonw)."""
+    """Append startup diagnostics to smk_gui.log (works under pythonw)."""
     try:
-        with (ROOT / "smd_gui.log").open("a", encoding="utf-8") as log_file:
+        with (ROOT / "smk_gui.log").open("a", encoding="utf-8") as log_file:
             log_file.write(message.rstrip() + "\n")
             log_file.flush()
     except OSError:

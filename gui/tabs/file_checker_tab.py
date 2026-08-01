@@ -9,7 +9,7 @@ from PyQt5.QtCore import Qt, QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QProgressBar,
-    QTextEdit, QTextBrowser, QFrame, QMessageBox, QFileDialog,
+    QTextEdit, QTextBrowser, QFrame, QMessageBox, QFileDialog, QSizePolicy,
 )
 
 from gui.common import WEB_ENGINE_AVAILABLE, QWebEngineView, play_happy_tone
@@ -23,15 +23,27 @@ class FileCheckerTabMixin:
 
     def _add_file_checker_tab(self) -> None:
         # --- Tab 3: File Checker ---
-        from smd.theme import SECTION_GAP
+        from smd.theme import (
+            CONTROL_GAP,
+            FIELD_GAP,
+            TAB_CONTENT_MARGIN_H,
+            TAB_CONTENT_MARGIN_V,
+        )
 
         scan_tab = self._make_tab_page()
         scan_layout = QVBoxLayout(scan_tab)
-        scan_layout.setContentsMargins(0, SECTION_GAP, 0, 0)
-        scan_layout.setSpacing(12)
+        # Same tight tab→content inset as WidthAwareColumn tabs.
+        scan_layout.setContentsMargins(
+            TAB_CONTENT_MARGIN_H,
+            TAB_CONTENT_MARGIN_V,
+            TAB_CONTENT_MARGIN_H,
+            TAB_CONTENT_MARGIN_V,
+        )
+        scan_layout.setSpacing(CONTROL_GAP)
 
         map_toolbar = QHBoxLayout()
-        map_toolbar.setSpacing(8)
+        map_toolbar.setContentsMargins(0, 0, 0, 0)
+        map_toolbar.setSpacing(FIELD_GAP)
         self.scan_btn = QPushButton('Check folder')
         self.scan_btn.setObjectName('accentBtn')
         self.scan_btn.setToolTip(
@@ -89,11 +101,12 @@ class FileCheckerTabMixin:
         results_stats_layout.setContentsMargins(12, 12, 12, 12)
         dash_header = QLabel('Metadata summary')
         dash_header.setProperty('class', 'sectionHeader')
-        results_stats_layout.addWidget(dash_header)
+        dash_header.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        results_stats_layout.addWidget(dash_header, 0, Qt.AlignLeft)
         self.scan_output = QTextEdit()
-        self.scan_output.setObjectName('consoleLog')
+        self.scan_output.setObjectName('libraryCheckReport')
         self.scan_output.setReadOnly(True)
-        results_stats_layout.addWidget(self.scan_output)
+        results_stats_layout.addWidget(self.scan_output, 1)
         results_stats_widget.setMinimumWidth(200)
         self.results_panels.addWidget(results_stats_widget)
 
@@ -122,6 +135,7 @@ class FileCheckerTabMixin:
         map_widget.setMinimumWidth(240)
         self.results_panels.addWidget(map_widget)
 
+        self.results_panels.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.results_panels.setStretchFactor(0, 2)
         self.results_panels.setStretchFactor(1, 3)
         scan_layout.addWidget(self.results_panels, 1)
@@ -153,6 +167,41 @@ class FileCheckerTabMixin:
             # Give the freshly-created WebEngineView something to show;
             # previously this ran unconditionally 200ms after startup.
             QTimer.singleShot(0, self.init_default_map)
+
+    def refresh_map_for_theme(self) -> None:
+        """Rebuild the open File Checker map for the current light/dark theme.
+
+        Light → Terrain; dark → CartoDB Dark Matter. Both directions rebuild
+        via `_apply_current_theme`. A prior theme-only render can be
+        interrupted; a real Check folder / scan job is not. Pan/zoom resets.
+        """
+        if getattr(self, 'map_view', None) is None:
+            return
+        # Interrupt an in-flight theme rebuild so Light↔Dark can flip quickly.
+        if getattr(self, '_map_theme_refresh', False):
+            self._stop_worker('map_render_worker')
+            self._map_theme_refresh = False
+        elif self.is_browse_scan_busy():
+            return
+        locations = getattr(self, '_last_map_locations', None)
+        if locations:
+            self._quiet_rerender_map(locations)
+        else:
+            self.init_default_map()
+
+    def _quiet_rerender_map(self, locations) -> None:
+        """Re-render pins for theme change without flipping Check-folder busy UI."""
+        self._map_theme_refresh = True
+        self._last_map_locations = locations
+        self._stop_worker('map_render_worker')
+        self.map_render_worker = MapRenderWorker(
+            locations,
+            dark_mode=bool(getattr(self, 'dark_mode_enabled', False)),
+        )
+        self.map_render_worker.progress.connect(self.on_map_render_progress)
+        self.map_render_worker.finished.connect(self.on_map_render_finished)
+        self.map_render_worker.error.connect(self.on_map_render_error)
+        self.map_render_worker.start()
 
     def init_default_map(self):
         """Initialize map with a default view"""
@@ -229,14 +278,20 @@ class FileCheckerTabMixin:
                 return str(json_path)
         return None
 
-    def _start_folder_check(self, folder: str) -> None:
+    def _start_folder_check(self, folder: str, *, note: str | None = None) -> None:
         self.selected_scan = folder
-        self.scan_label.setText(Path(folder).name)
+        self._check_folder_note = note
+        end_name = Path(folder).name
+        # Bold end folder + full path (redirect note goes in the report preface).
+        self.scan_label.setTextFormat(Qt.RichText)
+        self.scan_label.setText(
+            f'<b>{end_name}/</b>  —  {folder}'
+        )
         from smd.theme import apply_status_property
         apply_status_property(self.scan_label, 'ok')
         self._apply_status(
             self.unified_status,
-            f'Checking folder: {Path(folder).name}...',
+            f'Checking folder: {end_name}...',
             'ok',
         )
         QTimer.singleShot(300, self.run_full_analysis)
@@ -271,7 +326,10 @@ class FileCheckerTabMixin:
             self._default_check_folder_dir(),
         )
         if folder:
-            self._start_folder_check(folder)
+            from smd.media_types import resolve_check_folder
+
+            scan_path, note = resolve_check_folder(folder)
+            self._start_folder_check(str(scan_path), note=note)
 
     def _start_map_worker(self, *, full_workflow: bool = False) -> None:
         """Start media + GPS scan (after extension fix when part of full workflow)."""
@@ -294,9 +352,9 @@ class FileCheckerTabMixin:
         else:
             self.map_worker.finished.connect(self.on_map_finished)
         self.map_worker.start()
-        self.start_status_animation('Scanning media files...')
+        self._set_check_status_quiet('Step 2/3: Scanning media & GPS…', force=True)
 
-    def generate_thumbnail_base64(self, media_path, max_size=150):
+    def generate_thumbnail_base64(self, media_path, max_size=180):
         """Generate a base64 encoded thumbnail for map preview (photo or video)."""
         return _generate_thumbnail_base64(media_path, max_size)
 
@@ -332,7 +390,7 @@ class FileCheckerTabMixin:
                 return
 
             self.unified_progress.setValue(50)
-            self.start_status_animation('Rendering map with markers...')
+            self._set_check_status_quiet('Step 3/3: Building map…', force=True)
             self._last_map_locations = locations
 
             self._stop_worker('map_render_worker')
@@ -343,6 +401,7 @@ class FileCheckerTabMixin:
             self.map_render_worker.progress.connect(self.on_map_render_progress)
             self.map_render_worker.finished.connect(self.on_map_render_finished)
             self.map_render_worker.error.connect(self.on_map_render_error)
+            self.cancel_map_btn.setVisible(True)
             self.map_render_worker.start()
 
         except Exception as e:
@@ -393,51 +452,75 @@ class FileCheckerTabMixin:
             except RuntimeError:
                 pass
         if cancelled_any:
+            self.full_analysis_mode = False
             self.stop_status_animation()
-            self._apply_status(self.unified_status, 'Cancelling scan...', "warn")
+            self._apply_status(
+                self.unified_status,
+                'Cancelling… (safe — files are only read)',
+                'warn',
+            )
+
+    def _set_check_status_quiet(
+        self,
+        text: str,
+        *,
+        kind: str = 'info',
+        force: bool = False,
+    ) -> None:
+        """Update File Checker status without spinner flicker.
+
+        Progress bar can move freely; status text only changes when the
+        message itself changes (or force=True for step transitions).
+        """
+        self.stop_status_animation()
+        last_text = getattr(self, '_check_status_last_text', None)
+        if not force and text == last_text:
+            return
+        self._check_status_last_text = text
+        self._apply_status(self.unified_status, text, kind)
 
     def on_map_progress(self, current, total, found, eta, speed):
-        """Update map scan progress"""
+        """Update map scan progress (bar often; status text sparingly)."""
         self._last_map_scan_total = total
-        progress = int((current / total) * 100)
+        progress = int((current / total) * 100) if total else 0
         self.unified_progress.setValue(progress)
-        base_text = f'Scanning {current}/{total} files... {found} with GPS found ({progress}%) • ETA: {eta}'
-        
-        if self.status_animation_active:
-            self.status_base_text = base_text
+
+        bucket = min(100, (progress // 25) * 25)
+        if current >= total and total:
+            self._set_check_status_quiet(
+                f'Step 2/3: Scanning media & GPS… done  ({found:,} with location)',
+                force=True,
+            )
         else:
-            self.start_status_animation(base_text)
-        
-        # Update detailed view with comprehensive stats
+            self._set_check_status_quiet(
+                f'Step 2/3: Scanning media & GPS… {bucket}%'
+            )
+
         if self.show_detailed_view:
             if not self.operation_start_time:
                 self.operation_start_time = datetime.now()
-            
             elapsed = (datetime.now() - self.operation_start_time).total_seconds()
             elapsed_str = str(timedelta(seconds=int(elapsed)))
-            
             self.processing_speeds.append(speed)
             avg_speed = sum(self.processing_speeds[-20:]) / min(20, len(self.processing_speeds))
-            
-            detailed_text = (
-                f"⌛ Elapsed: {elapsed_str} | Speed: {speed:.1f} files/sec (avg: {avg_speed:.1f})\n"
-                f"📊 Progress: {current}/{total} ({progress}%) | 📍 GPS Found: {found} ({(found/current*100) if current > 0 else 0:.1f}%)\n"
-                f"⏱️ ETA: {eta} | Current: {self.current_file_being_processed[:50]}..."
+            self.detailed_status.setText(
+                f"Elapsed: {elapsed_str} | Speed: {speed:.1f} files/sec (avg: {avg_speed:.1f})\n"
+                f"Progress: {current}/{total} ({progress}%) | GPS found: {found}\n"
+                f"ETA: {eta}"
             )
-            self.detailed_status.setText(detailed_text)
 
     def on_map_render_progress(self, progress, status_text):
-        """Update progress during map rendering"""
+        """Update progress during map rendering — bar only; one calm status line."""
         self.unified_progress.setValue(progress)
-        # Only update base text if animation is active
-        if self.status_animation_active:
-            self.status_base_text = status_text
-        else:
-            self._apply_status(self.unified_status, status_text, "info")
+        if getattr(self, '_map_theme_refresh', False):
+            return
+        self._set_check_status_quiet('Step 3/3: Building map…')
 
     def on_map_render_finished(self, html_file_path):
         """Handle map rendering completion"""
         print("DEBUG: on_map_render_finished called")
+        theme_refresh = bool(getattr(self, '_map_theme_refresh', False))
+        self._map_theme_refresh = False
         try:
             self._ensure_map_view()
             print(f"DEBUG: Map file path: {html_file_path}")
@@ -469,27 +552,28 @@ class FileCheckerTabMixin:
                         f"<p>If it didn't open automatically, click <a href='{safe_link}'>here</a>.</p>"
                     )
             
-            # Get location count
-            total_files = len(self.map_render_worker.locations) if hasattr(self.map_render_worker, 'locations') else 0
-            print(f"DEBUG: Total files with GPS: {total_files}")
-            
-            # Handle full workflow completion
-            if self.full_analysis_mode:
-                status_text = (
-                    f'Check complete — {total_files} files with GPS on the map'
+            pin_count = 0
+            if hasattr(self, 'map_render_worker') and hasattr(
+                self.map_render_worker, 'locations'
+            ):
+                pin_count = len(self.map_render_worker.locations or [])
+            elif getattr(self, '_last_map_locations', None):
+                pin_count = len(self._last_map_locations)
+            print(f"DEBUG: Total files with GPS: {pin_count}")
+
+            if not theme_refresh:
+                self._set_check_status_quiet(
+                    f'Map ready — {pin_count:,} pins',
+                    kind='ok',
+                    force=True,
                 )
-                self._apply_status(self.unified_status, status_text, "ok")
-                self.unified_progress.setValue(100)
+            self.unified_progress.setValue(100)
+            if self.full_analysis_mode:
                 self.full_analysis_mode = False
                 self._set_browse_scan_busy(False)
-            else:
-                status_text = (
-                    f'Map loaded — {total_files} files with GPS data'
-                )
-                self._apply_status(self.unified_status, status_text, "ok")
-                self.unified_progress.setValue(100)
-            play_happy_tone()
-            
+            if not theme_refresh:
+                play_happy_tone()
+
             # Hide cancel button after completion
             self.cancel_map_btn.setVisible(False)
             print("DEBUG: on_map_render_finished completed successfully")
@@ -516,28 +600,30 @@ class FileCheckerTabMixin:
             pass
 
     def handle_file_open_request(self, file_path):
-        """Handle file open request from map"""
-        if file_path and isinstance(file_path, str) and file_path != 'null':
-            try:
-                # Normalize path back to Windows format
-                file_path = file_path.replace('/', '\\')
-                print(f"DEBUG: Opening file from map: {file_path}")
-                if os.path.exists(file_path):
-                    self.fullscreen_popup.open_file(file_path)
-                else:
-                    print(f"ERROR: File not found: {file_path}")
-                    QMessageBox.warning(self, 'Error', f'File not found:\n{file_path}')
-            except Exception as e:
-                print(f"ERROR: Error opening file: {e}")
-                import traceback
-                traceback.print_exc()
-                QMessageBox.warning(self, 'Error', f'Could not open file:\n{str(e)}')
+        """Open media externally when a map marker is clicked (hover keeps tooltip)."""
+        if not file_path or not isinstance(file_path, str) or file_path == 'null':
+            return
+        try:
+            path = Path(file_path)
+            if not path.is_file():
+                path = Path(os.path.normpath(file_path.replace('/', os.sep)))
+            if not path.is_file():
+                QMessageBox.warning(self, 'Error', f'File not found:\n{file_path}')
+                return
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+        except Exception as e:
+            print(f"ERROR: Error opening file: {e}")
+            QMessageBox.warning(self, 'Error', f'Could not open file:\n{str(e)}')
 
     def on_map_render_error(self, error_msg):
         """Handle map rendering error with friendly message"""
         print(f"ERROR: Map rendering error: {error_msg}")
+        theme_refresh = bool(getattr(self, '_map_theme_refresh', False))
+        self._map_theme_refresh = False
         self.stop_status_animation()
-        
+        if theme_refresh:
+            return
+
         # Convert technical error to user-friendly message
         if 'connect' in error_msg.lower() or 'network' in error_msg.lower() or 'timeout' in error_msg.lower():
             friendly_msg = "Unable to load map. Please check your internet connection and try again."
@@ -552,108 +638,55 @@ class FileCheckerTabMixin:
         self.full_analysis_mode = False
         QMessageBox.critical(self, 'Map Error', friendly_msg)
 
-    def _append_media_stats(self, scan_report: dict, folder_name: str) -> None:
-        """Append media-only folder statistics from MapWorker scan report."""
-        from smd.media_types import format_bytes
-
-        file_types = scan_report.get('file_types') or {}
-        total_media = scan_report.get('total_media', 0)
-        total_images = scan_report.get('total_images', 0)
-        total_videos = scan_report.get('total_videos', 0)
-        total_size = sum(info.get('size', 0) for info in file_types.values())
-        mismatches = scan_report.get('extension_mismatches', 0)
-        resolution_counts = scan_report.get('resolution_counts') or {}
-
-        output = "\n" + "=" * 60 + "\n"
-        output += "📊 MEDIA STATISTICS\n"
-        output += "=" * 60 + "\n"
-        output += f"📁 Folder: {folder_name}\n"
-        output += f"📊 Media files: {total_media:,} ({total_images:,} photos, {total_videos:,} videos)\n"
-        output += f"💾 Total size: {format_bytes(total_size)}\n"
-        if mismatches:
-            output += (
-                f"⚠ Mismatched extension: {mismatches:,} "
-                "(read-only report - re-run \"Save memories\" processing to fix these)\n"
-            )
-        if resolution_counts:
-            # Not "which phone" - Snapchat strips Make/Model camera tags from
-            # every exported photo and video (verified empirically), so that
-            # can't be shown truthfully. Resolution is real, present data and
-            # a reasonable rough proxy for "how many different screens/devices".
-            ranked = sorted(resolution_counts.items(), key=lambda kv: kv[1], reverse=True)
-            top_res, top_count = ranked[0]
-            output += (
-                f"📐 Photo resolutions: {len(ranked)} unique "
-                f"(most common: {top_res} - {top_count:,} photo(s))\n"
-            )
-        output += "\n" + "─" * 60 + "\n"
-        output += "📂 File types:\n"
-        output += "─" * 60 + "\n"
-        for ext, info in sorted(file_types.items(), key=lambda x: x[1]['count'], reverse=True):
-            output += f"  {ext:15} | {info['count']:6,} files | {format_bytes(info['size']):>12}\n"
-        output += "=" * 60 + "\n"
-        self.scan_output.append(output)
-
-    def _append_gps_summary(self, locations, scan_report: dict | None = None) -> None:
-        """Append GPS counts with embedded vs JSON breakdown."""
-        report = scan_report or {}
-        embedded = report.get('gps_embedded') or {}
-        json_gps = report.get('gps_json') or {}
-        missing = report.get('gps_missing') or {}
-
-        emb_photos = embedded.get('image', 0)
-        emb_videos = embedded.get('video', 0)
-        json_photos = json_gps.get('image', 0)
-        json_videos = json_gps.get('video', 0)
-        miss_photos = missing.get('image', 0)
-        miss_videos = missing.get('video', 0)
-
-        with_gps = emb_photos + emb_videos + json_photos + json_videos
-        without_gps = miss_photos + miss_videos
-        total_scanned = report.get('total_media') or (with_gps + without_gps) or len(locations)
-
-        try:
-            unique_locs = len({
-                (round(loc['coords'][0], 4), round(loc['coords'][1], 4))
-                for loc in locations
-                if loc.get('coords')
-            })
-        except Exception:
-            unique_locs = 0
-
-        output = "\n" + "=" * 60 + "\n"
-        output += "📍 GPS METADATA\n"
-        output += "=" * 60 + "\n"
-        output += f"✓ Files with GPS: {with_gps:,}\n"
-        output += f"   • Embedded in file: {emb_photos + emb_videos:,} ({emb_photos:,} photos, {emb_videos:,} videos)\n"
-        if json_photos or json_videos:
-            output += f"   • From export JSON: {json_photos + json_videos:,} ({json_photos:,} photos, {json_videos:,} videos)\n"
-        output += f"✗ Files without GPS: {without_gps:,} ({miss_photos:,} photos, {miss_videos:,} videos)\n"
-        output += f"📊 Media files checked: {total_scanned:,}\n"
-        output += f"🗺️ Unique locations: {unique_locs:,}\n"
-        output += "=" * 60 + "\n"
-        self.scan_output.append(output)
-
     def _apply_scan_report(self, locations, scan_report: dict | None) -> None:
-        """Write media stats and GPS summary from a completed MapWorker run."""
+        """Replace the metadata panel with one library-check HTML summary."""
+        import html as html_mod
+
+        from smd.file_checker_report import build_library_check_report
+
         report = dict(scan_report or {})
         folder_name = Path(self.selected_scan).name if self.selected_scan else ''
-        self._append_media_stats(report, folder_name)
-        self._append_gps_summary(locations, report)
+        mismatches = getattr(self, '_extension_mismatches_reported', None)
 
-    def on_scan_output(self, line: str) -> None:
-        """Append extension-fixer log lines during Check folder."""
-        self.scan_output.append(line)
+        preface: list[str] = [
+            '<div style="font-family: Segoe UI, sans-serif; font-size:12px; '
+            'line-height:1.4; margin:0 0 6px 0;">'
+        ]
+        note = getattr(self, '_check_folder_note', None)
+        if note:
+            preface.append(
+                f'<div style="opacity:0.9;">{html_mod.escape(note)}</div>'
+            )
+        json_path = self._mapping_json_for_scan(self.selected_scan)
+        if json_path:
+            preface.append(
+                '<div style="opacity:0.85;">GPS lookup: using '
+                f'<b>{html_mod.escape(Path(json_path).name)}</b> for files '
+                'missing embedded coordinates.</div>'
+            )
+        preface.append('</div>')
+
+        body = build_library_check_report(
+            report,
+            locations,
+            folder_name,
+            extension_mismatches_from_scan=mismatches,
+            as_html=True,
+        )
+        self.scan_output.setHtml(''.join(preface) + body)
         scrollbar = self.scan_output.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        scrollbar.setValue(0)
+
+    def on_scan_output(self, _line: str) -> None:
+        """Ignore verbose ScanWorker log lines; summary folds extensions in later."""
+        return
 
     def on_scan_progress(self, value: int) -> None:
         self.unified_progress.setValue(value)
-        base_text = f'Checking file extensions... {value}%'
-        if self.status_animation_active:
-            self.status_base_text = base_text
-        else:
-            self.start_status_animation(base_text)
+        bucket = min(100, (int(value) // 25) * 25)
+        self._set_check_status_quiet(
+            f'Step 1/3: Checking file extensions… {bucket}%'
+        )
 
     def on_scan_finished_in_full_workflow(self, return_code: int) -> None:
         """After the read-only extension check — continue to GPS scan and map."""
@@ -664,20 +697,12 @@ class FileCheckerTabMixin:
             self._set_browse_scan_busy(False)
             return
 
-        mismatched = getattr(self.scan_worker, 'planned_count', 0)
-        total = getattr(self.scan_worker, 'total_scanned', 0)
-        if mismatched:
-            self.scan_output.append(
-                f"\n⚠ Found {mismatched} mislabeled file(s) out of {total} checked "
-                "(file checker only reports - it never renames anything). If this "
-                "folder came from SMD's own \"Save memories\" processing, re-run "
-                "processing for this account to have it fix these automatically.\n"
-            )
-        else:
-            self.scan_output.append(f"\n✓ All {total} checked extensions look correct.\n")
+        self._extension_mismatches_reported = getattr(
+            self.scan_worker, 'planned_count', 0
+        )
 
         self.unified_progress.setValue(0)
-        self._apply_status(self.unified_status, 'Step 2/3: Scanning media and GPS...', 'info')
+        self._set_check_status_quiet('Step 2/3: Scanning media & GPS…', force=True)
         self._start_map_worker(full_workflow=True)
 
     def run_full_analysis(self):
@@ -696,15 +721,14 @@ class FileCheckerTabMixin:
 
         self.full_analysis_mode = True
         self._set_browse_scan_busy(True)
+        self._extension_mismatches_reported = 0
 
         self.scan_output.clear()
-        json_path = self._mapping_json_for_scan(self.selected_scan)
-        if json_path:
-            self.scan_output.append(
-                f"GPS lookup: using {Path(json_path).name} for files missing embedded coordinates.\n"
-            )
         self.unified_progress.setValue(0)
-        self._apply_status(self.unified_status, 'Step 1/3: Checking file extensions...', 'info')
+        self._check_status_last_text = None
+        self._set_check_status_quiet(
+            'Step 1/3: Checking file extensions…', force=True
+        )
 
         self._stop_worker('scan_worker')
         self.scan_worker = ScanWorker(self.selected_scan, dry_run=True)
@@ -716,6 +740,13 @@ class FileCheckerTabMixin:
     def on_map_finished_full_workflow(self, locations, total_images, total_videos):
         """After media scan during Check folder — show stats then render map."""
         try:
+            if getattr(getattr(self, 'map_worker', None), 'cancelled', False):
+                self.stop_status_animation()
+                self.cancel_map_btn.setVisible(False)
+                self.full_analysis_mode = False
+                self._set_browse_scan_busy(False)
+                self._apply_status(self.unified_status, 'Check cancelled.', 'warn')
+                return
             self.stop_status_animation()
             scan_report = getattr(self.map_worker, 'scan_report', {})
             self._apply_scan_report(locations, scan_report)
@@ -732,7 +763,7 @@ class FileCheckerTabMixin:
                 self.cancel_map_btn.setVisible(False)
                 return
 
-            self._apply_status(self.unified_status, 'Step 3/3: Rendering map...', 'info')
+            self._set_check_status_quiet('Step 3/3: Building map…', force=True)
             self.unified_progress.setValue(0)
             self.map_data = locations
             self.render_map_data(locations)
@@ -751,7 +782,7 @@ class FileCheckerTabMixin:
                 return
 
             self.unified_progress.setValue(50)
-            self.start_status_animation('Rendering map with markers...')
+            self._set_check_status_quiet('Step 3/3: Building map…', force=True)
             self._last_map_locations = gps_data
             self._stop_worker('map_render_worker')
             self.map_render_worker = MapRenderWorker(
@@ -761,6 +792,7 @@ class FileCheckerTabMixin:
             self.map_render_worker.progress.connect(self.on_map_render_progress)
             self.map_render_worker.finished.connect(self.on_map_render_finished)
             self.map_render_worker.error.connect(self.on_map_render_error)
+            self.cancel_map_btn.setVisible(True)
             self.map_render_worker.start()
         except Exception as e:
             self._apply_status(self.unified_status, f'Error rendering map: {str(e)}', 'err')

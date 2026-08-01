@@ -10,7 +10,7 @@ wherever the phone physically was at capture time. If a phone doesn't
 auto-update timezone while traveling (common when roaming without a data
 connection, or with automatic timezone updates disabled), GPS-derived local
 time can be off by an hour or more from what the user actually saw in
-Snapchat and remembers. Matching the system timezone keeps SMD's output
+Snapchat and remembers. Matching the system timezone keeps SMK's output
 consistent with what users expect from their own Snapchat app. See
 agent-docs/DECISIONS.md for the concrete case that motivated this.
 """

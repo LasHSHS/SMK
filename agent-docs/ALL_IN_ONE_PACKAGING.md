@@ -1,16 +1,16 @@
-# SMD — All-in-One Packaging (project memory)
+# SMK — All-in-One Packaging (project memory)
 
 **Last updated:** 2026-07-07  
 **Owner decision:** Las — file size is **not** a concern. Prefer completeness over a smaller download.
 
-This document is the canonical note for humans and AI assistants working on SMD.  
-When in doubt about distribution: **end users install only SMD — nothing else.**
+This document is the canonical note for humans and AI assistants working on SMK.  
+When in doubt about distribution: **end users install only SMK — nothing else.**
 
 ---
 
 ## Product rule
 
-> SMD must run as **one program** after install.  
+> SMK must run as **one program** after install.  
 > No Python, pip, ffmpeg, PATH tweaks, or third-party tools for normal users.
 
 Same philosophy as commercial tools (SnapEasy, etc.), but open source (GPLv3 planned).
@@ -55,7 +55,7 @@ This script:
 3. Runs `pyinstaller smd.spec`
 4. Copies ffmpeg into `dist\smd\tools\ffmpeg` (and `_internal` if present)
 
-**Output:** `dist\smd\smd.exe` + folder → zip or compile `smd_installer.iss` (Inno Setup).
+**Output:** `dist\smd\SMK.exe` + folder → zip or compile `smd_installer.iss` (Inno Setup).
 
 ### Fetch ffmpeg only (dev, without full build)
 
@@ -79,15 +79,15 @@ Source: gyan.dev **ffmpeg-release-essentials** (Windows). Binaries are gitignore
 | `tools/ffmpeg/` | Bundled binaries (not in git) |
 | `smd_installer.iss` | Windows installer |
 | `DISTRIBUTION_GUIDE.md` | Release checklist |
-| `desktop_gui_pyqt.py` | Startup check: frozen build = “SMD ready”, not “install ffmpeg” |
+| `desktop_gui_pyqt.py` | Startup check: frozen build = “SMK ready”, not “install ffmpeg” |
 
 ---
 
 ## Legal / release notes
 
 - **FFmpeg** is LGPL/GPL. Official releases must mention FFmpeg and link to https://ffmpeg.org/legal.html
-- SMD is **not affiliated with Snap Inc.**
-- GPLv3 for SMD itself when published
+- SMK is **not affiliated with Snap Inc.**
+- GPLv3 for SMK itself when published
 
 ---
 
@@ -95,9 +95,9 @@ Source: gyan.dev **ffmpeg-release-essentials** (Windows). Binaries are gitignore
 
 | | End user | Developer (Las / contributors) |
 |---|----------|----------------------------------|
-| Install | SMD installer or portable `dist/smd` | Git clone + `.venv` + `pip install -r requirements` |
-| ffmpeg | Already inside SMD | `fetch_ffmpeg.ps1` once, or `build_smd.ps1` |
-| Run | `smd.exe` | `python desktop_gui_pyqt.py` or CLI `main.py` |
+| Install | SMK installer or portable `dist/smd` | Git clone + `.venv` + `pip install -r requirements` |
+| ffmpeg | Already inside SMK | `fetch_ffmpeg.ps1` once, or `build_smd.ps1` |
+| Run | `SMK.exe` | Desktop `SMKTester.bat` / `python desktop_gui_pyqt.py` or CLI `main.py` |
 
 ---
 

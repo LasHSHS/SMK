@@ -4,37 +4,38 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
+from smd.help_content import headed_title
+
 GUIDE_IMAGE_WIDTH = 360
 
-_STYLES = f"""
-body {{ margin: 0; line-height: 1.55; }}
-.guide-root {{ line-height: 1.55; }}
-.guide-h2 {{ margin: 0 0 10px; font-size: 22px; font-weight: 700; }}
-.guide-h3 {{ margin: 0 0 10px; font-size: 18px; font-weight: 700; }}
-.guide-section {{
-    margin: 32px 0 36px; padding: 0 0 28px;
+_STYLES = """
+body { margin: 0; line-height: 1.55; }
+.guide-root { line-height: 1.55; }
+/* Step title top spacing is on headed_title (level 3); keep a light rule. */
+.guide-section {
+    margin: 8px 0 8px; padding: 0 0 18px;
     border-bottom: 1px solid rgba(128, 128, 128, 0.35);
-}}
-.guide-body {{ line-height: 1.65; font-size: 16px; }}
-.guide-body p {{ margin: 0 0 12px; }}
-.guide-body ul {{ margin: 8px 0 12px 22px; padding: 0; }}
-.guide-body li {{ margin-bottom: 6px; }}
-.guide-body code {{
+}
+.guide-body { line-height: 1.65; font-size: 16px; }
+.guide-body p { margin: 0 0 12px; }
+.guide-body ul { margin: 8px 0 12px 22px; padding: 0; }
+.guide-body li { margin-bottom: 6px; }
+.guide-body code {
     font-family: Consolas, monospace; font-size: 13px;
     background: rgba(128, 128, 128, 0.15); padding: 1px 5px; border-radius: 4px;
-}}
-.guide-intro {{ margin: 0 0 28px; line-height: 1.65; font-size: 16px; }}
-.guide-img-wrap {{
+}
+.guide-intro { margin: 0 0 28px; line-height: 1.65; font-size: 16px; }
+.guide-img-wrap {
     text-align: center; margin: 20px 0 8px; line-height: normal;
-}}
-.guide-img {{
+}
+.guide-img {
     max-width: 100%; height: auto;
     border: 1px solid #555; border-radius: 12px;
     vertical-align: top;
-}}
-.guide-missing {{
+}
+.guide-missing {
     color: #c45c0a; font-size: 13px; margin: 12px 0; font-style: italic;
-}}
+}
 """
 
 
@@ -126,10 +127,10 @@ def _guide_steps(save_tab_name: str) -> list[dict]:
             'alt': 'All Time and Submit',
         },
         {
-            'title': 'Step 6: Save your memories in SMD',
+            'title': 'Step 6: Save your memories in SMK',
             'body': (
                 f'<p>Open the <b>{html.escape(save_tab_name)}</b> tab, select any one ZIP or the folder with all parts, '
-                'then click <b>Start full processing</b>.</p>'
+                'then click <b>Start processing</b>.</p>'
             ),
         },
         {
@@ -142,20 +143,26 @@ def _guide_steps(save_tab_name: str) -> list[dict]:
     ]
 
 
-def build_guide_html(save_tab_name: str) -> str:
+def build_guide_html(save_tab_name: str, *, accent: str | None = None) -> str:
+    """Build Guide HTML. *accent* is the title underline color (theme secondary)."""
+    from smd.theme import palette
+
+    if not accent:
+        accent = palette(True)["secondary"]
+
     guide_dir = guide_assets_dir()
     parts = [
         '<html><head><meta charset="utf-8"><style>',
         _STYLES,
         '</style></head><body><div class="guide-root">',
-        '<h2 class="guide-h2">How to request your Snapchat data</h2>',
+        headed_title("How to request your Snapchat data", level=2, accent=accent),
         f'<p class="guide-intro">Follow these steps in the Snapchat app, then use the '
-        f'<b>{html.escape(save_tab_name)}</b> tab in SMD.</p>',
+        f'<b>{html.escape(save_tab_name)}</b> tab in SMK.</p>',
     ]
 
     for step in _guide_steps(save_tab_name):
         parts.append('<section class="guide-section">')
-        parts.append(f'<h3 class="guide-h3">{html.escape(step["title"])}</h3>')
+        parts.append(headed_title(step["title"], level=3, accent=accent))
         parts.append(f'<div class="guide-body">{step["body"]}</div>')
         image = step.get('image')
         if image is not None:

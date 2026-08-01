@@ -1,6 +1,7 @@
 """Save memories tab mixin: setup, run lifecycle, dashboard, after-processing."""
 from __future__ import annotations
 
+import html
 import os
 import re
 import shutil
@@ -13,15 +14,15 @@ from PyQt5.QtCore import Qt, QSettings, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
-    QLabel, QLineEdit, QComboBox, QCheckBox, QProgressBar, QFileDialog,
+    QLabel, QComboBox, QCheckBox, QProgressBar, QFileDialog, QDialog,
     QMessageBox, QSizePolicy, QMenu, QGraphicsOpacityEffect,
+    QButtonGroup, QLineEdit, QInputDialog, QListView, QFrame,
 )
 
-from gui.common import ROOT, TAB_SAVE_MEMORIES, play_happy_tone
+from gui.common import ROOT, TAB_SAVE_MEMORIES
 from gui.widgets import LiveRunDashboard
 from gui.workers import (
     LocalExportWorker,
-    StagingCheckWorker,
     TechnicalStorageWorker,
 )
 
@@ -31,7 +32,7 @@ class SaveMemoriesTabMixin:
 
     def _add_save_memories_tab(self) -> None:
         # --- Tab 2: Save memories ---
-        from smd.theme import SECTION_GAP
+        from smd.theme import CONTROL_GAP, FIELD_GAP, SECTION_GAP
 
         download_tab = self._make_tab_page()
         download_tab_layout = QVBoxLayout(download_tab)
@@ -42,18 +43,96 @@ class SaveMemoriesTabMixin:
         controls_layout.setSpacing(SECTION_GAP)
         controls_layout.setContentsMargins(0, 0, 0, 0)
 
-        setup_box, setup_lay = self._section('Export & project')
+        account_box, account_lay = self._section('Account')
+        self._active_account_name = ''
+        # Same gold-border checkmark style as Run options (QCheckBox theme),
+        # but exclusive via QButtonGroup so only one mode is selected at a time.
+        self._account_mode_group = QButtonGroup(self)
+        self._account_mode_group.setExclusive(True)
+        account_mode_row = QHBoxLayout()
+        account_mode_row.setContentsMargins(0, 0, 0, 0)
+        account_mode_row.setSpacing(CONTROL_GAP * 2)
+        self.new_account_radio = QCheckBox('New account')
+        self.old_account_radio = QCheckBox('Existing account')
+        self._account_mode_group.addButton(self.new_account_radio)
+        self._account_mode_group.addButton(self.old_account_radio)
+        self.new_account_radio.toggled.connect(self._on_account_mode_toggled)
+        account_mode_row.addWidget(self.new_account_radio)
+        account_mode_row.addWidget(self.old_account_radio)
+        account_mode_row.addStretch(1)
+        account_lay.addLayout(account_mode_row)
+
+        new_account_row = QHBoxLayout()
+        new_account_row.setContentsMargins(0, 0, 0, 0)
+        new_account_row.setSpacing(FIELD_GAP)
+        new_account_row.addWidget(QLabel('Name folder:'))
+        self.new_account_name_edit = QLineEdit()
+        self.new_account_name_edit.setPlaceholderText('e.g. your name or nickname')
+        self.new_account_name_edit.setToolTip(
+            'Folder name for this export. Created automatically when you Start processing.'
+        )
+        self.new_account_name_edit.textChanged.connect(self._on_new_account_name_changed)
+        new_account_row.addWidget(self.new_account_name_edit, 1)
+        account_lay.addLayout(new_account_row)
+
+        self.new_account_preview_label = QLabel('')
+        self.new_account_preview_label.setProperty('class', 'caption')
+        account_lay.addWidget(self.new_account_preview_label)
+
+        old_account_row = QHBoxLayout()
+        old_account_row.setContentsMargins(0, 0, 0, 0)
+        old_account_row.setSpacing(FIELD_GAP)
+        self.old_account_label = QLabel('No previous accounts found yet.')
+        self.old_account_label.setWordWrap(True)
+        old_account_row.addWidget(self.old_account_label, 1)
+        account_lay.addLayout(old_account_row)
+
+        # Path banner + Change button side-by-side.
+        active_account_row = QHBoxLayout()
+        active_account_row.setContentsMargins(0, 0, 0, 0)
+        active_account_row.setSpacing(FIELD_GAP)
+        self.active_account_label = QLabel('No account selected yet.')
+        self.active_account_label.setObjectName('infoBanner')
+        self.active_account_label.setWordWrap(True)
+        active_account_row.addWidget(self.active_account_label, 1)
+        self.old_account_change_btn = QPushButton('Change output folder')
+        self.old_account_change_btn.setObjectName('toolbarBtn')
+        self.old_account_change_btn.setToolTip('Pick a different already-processed account folder')
+        self.old_account_change_btn.clicked.connect(self._on_old_account_change)
+        active_account_row.addWidget(self.old_account_change_btn, 0, Qt.AlignVCenter)
+        account_lay.addLayout(active_account_row)
+
+        setup_box, setup_lay = self._section('My Data – zip files')
+        export_hint = QLabel(
+            'Choose the folder with the ZIP file(s) from your Snapchat My Data download. '
+            'If Snapchat sent several parts, keep them all in that same folder.'
+        )
+        export_hint.setProperty('class', 'caption')
+        export_hint.setWordWrap(True)
+        setup_lay.addWidget(export_hint)
+        guide_link = QLabel(
+            '<a href="smd://guide">Don\'t have your export yet? '
+            'How to request your Snapchat data</a>'
+        )
+        guide_link.setTextFormat(Qt.RichText)
+        guide_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        guide_link.setOpenExternalLinks(False)
+        guide_link.setCursor(Qt.PointingHandCursor)
+        guide_link.setWordWrap(True)
+        guide_link.linkActivated.connect(
+            lambda *_: self.tabs.setCurrentIndex(self._tab_guide)
+        )
+        setup_lay.addWidget(guide_link)
         zip_btn_row = QHBoxLayout()
-        zip_btn_row.setSpacing(8)
-        zip_files_btn = QPushButton('Choose ZIP files')
-        zip_files_btn.setObjectName('accentBtn')
-        zip_files_btn.setToolTip('Select one or more ZIP parts (Ctrl or Shift for multiple)')
-        zip_files_btn.clicked.connect(self.select_zip_files)
+        zip_btn_row.setContentsMargins(0, 0, 0, 0)
+        zip_btn_row.setSpacing(FIELD_GAP)
         zip_folder_btn = QPushButton('Choose folder')
         zip_folder_btn.setObjectName('accentBtn')
-        zip_folder_btn.setToolTip('Select a folder that contains all ZIP parts')
-        zip_folder_btn.clicked.connect(self.select_zip_folder)
-        zip_btn_row.addWidget(zip_files_btn)
+        zip_folder_btn.setToolTip(
+            'Pick the folder where you put every part of your My Data export - '
+            'SMK finds all ZIP files in that folder automatically.'
+        )
+        zip_folder_btn.clicked.connect(self.select_export_folder)
         zip_btn_row.addWidget(zip_folder_btn)
         zip_btn_row.addStretch(1)
         setup_lay.addLayout(zip_btn_row)
@@ -61,46 +140,34 @@ class SaveMemoriesTabMixin:
         self.zip_label.setProperty('class', 'muted')
         setup_lay.addWidget(self.zip_label)
         self.export_summary_label = QLabel(
-            'Select ZIP files or a folder. A summary of what was found appears here.'
+            'After you choose a folder, a summary of the ZIP parts SMK found appears here.'
         )
         self.export_summary_label.setWordWrap(True)
         self.export_summary_label.setTextFormat(Qt.RichText)
         self.export_summary_label.setObjectName('infoBanner')
         setup_lay.addWidget(self.export_summary_label)
 
-        project_divider = QLabel('Where to save')
-        project_divider.setProperty('class', 'sectionHeader')
-        setup_lay.addWidget(project_divider)
-        account_hint = QLabel('Your memories are saved on the Desktop in a folder with this name.')
-        account_hint.setWordWrap(True)
-        account_hint.setProperty('class', 'muted')
-        setup_lay.addWidget(account_hint)
-        self.account_input = QLineEdit()
-        self.account_input.setPlaceholderText('Project folder name (e.g. Mary, Las)')
-        self.account_input.setToolTip('Folder name on your Desktop, e.g. Mary')
-        self.account_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        setup_lay.addWidget(self.account_input)
-        self.restore_account_name_field()
-        self.account_input.textChanged.connect(self._on_account_name_edited)
-        self.account_input.editingFinished.connect(self._update_run_readiness)
-
-        self.download_path_label = QLabel('Folder: (will be shown when you pick a project)')
-        self.download_path_label.setProperty('class', 'caption')
-        setup_lay.addWidget(self.download_path_label)
-        self.technical_storage_label = QLabel('')
-        self.technical_storage_label.setProperty('class', 'caption')
-        self.technical_storage_label.setWordWrap(True)
-        setup_lay.addWidget(self.technical_storage_label)
-        setup_lay.addStretch(1)
-
         perf_box, perf_lay = self._section('Performance')
         self.perf_mode_combo = QComboBox()
+        # Custom list view avoids native Windows popup chrome (white bars).
+        _perf_view = QListView()
+        _perf_view.setFrameShape(QFrame.NoFrame)
+        _perf_view.setUniformItemSizes(True)
+        self.perf_mode_combo.setView(_perf_view)
+        self.perf_mode_combo.setMaxVisibleItems(3)
         self.perf_mode_combo.addItems([
-            'Maximum (use all power)',
-            'Balanced (smooth PC use)',
-            'Eco (background friendly)',
+            'Maximum - fastest; PC may feel busy (more power)',
+            'Balanced - good speed; light multitasking OK',
+            'Eco - slower; easier multitasking / better on battery',
         ])
-        self.perf_mode_combo.setToolTip('Controls speed for ZIP processing and GPS scanning')
+        self.perf_mode_combo.setToolTip(
+            'How hard SMK works your PC while processing.\n'
+            'Maximum: finishes sooner; other apps may stutter; uses more power.\n'
+            'Balanced: solid speed; browsing or chatting is usually fine.\n'
+            'Eco: slower; best when using other apps, or on battery.\n'
+            '(On a plugged-in desktop, “battery” matters less — Eco still leaves '
+            'more room for other programs.)'
+        )
         self.perf_mode_combo.setCurrentIndex(0)
         self.perf_mode_combo.currentIndexChanged.connect(self.on_perf_mode_changed)
 
@@ -114,24 +181,17 @@ class SaveMemoriesTabMixin:
         self.system_profile_label.setProperty('class', 'muted')
         self.system_profile_label.setWordWrap(True)
         perf_lay.addWidget(self.system_profile_label)
-        perf_btn_row = QHBoxLayout()
-        perf_btn_row.setSpacing(8)
-        self.apply_recommend_btn = QPushButton('Recommended settings')
-        self.apply_recommend_btn.setObjectName('toolbarBtn')
-        self.apply_recommend_btn.setToolTip('Set performance from your PC, RAM, and power state')
-        self.apply_recommend_btn.clicked.connect(self.apply_recommended_settings)
-        self.assess_time_btn = QPushButton('Estimate time')
-        self.assess_time_btn.setObjectName('toolbarBtn')
-        self.assess_time_btn.setToolTip('Rough time for each performance mode before you start')
-        self.assess_time_btn.clicked.connect(self.show_processing_estimate)
-        perf_btn_row.addWidget(self.apply_recommend_btn)
-        perf_btn_row.addWidget(self.assess_time_btn)
-        perf_btn_row.addStretch(1)
-        perf_lay.addLayout(perf_btn_row)
-        perf_lay.addStretch(1)
+        self.estimate_time_label = QLabel(
+            'Estimated time: choose a Snapchat export folder to see a rough estimate.'
+        )
+        self.estimate_time_label.setProperty('class', 'caption')
+        self.estimate_time_label.setWordWrap(True)
+        self.estimate_time_label.setToolTip(
+            'Rough estimate for the selected performance mode. Large video-heavy '
+            'exports take much longer; a full library can take several hours.'
+        )
+        perf_lay.addWidget(self.estimate_time_label)
         self.perf_section = perf_box
-
-        from smd.theme import CONTROL_GAP, FIELD_GAP
 
         output_hint = QLabel(
             'Snapchat filters included by default. Optionally keep plain originals too.'
@@ -148,60 +208,94 @@ class SaveMemoriesTabMixin:
 
         self.technical_view_chk = QCheckBox('Technical view')
         self.technical_view_chk.setToolTip(
-            'Shows staging, checkpoints, reports, and other working data used by SMD. '
+            'Shows advanced settings and buttons for SMK working data '
+            '(staging, JSON, reports, checkpoint, logs, quarantine, debug). '
             'Leave off for a simple Desktop folder with just your memories.'
         )
         stored_tv = QSettings('SnapchatMemories', 'Downloader').value('technical_view', False)
         self.technical_view_chk.setChecked(str(stored_tv).lower() in ('1', 'true', 'yes'))
         self.technical_view_chk.stateChanged.connect(self._on_technical_view_changed)
 
-        self.keep_staging_chk = QCheckBox('Keep staging media files')
-        self.keep_staging_chk.setToolTip(
-            "Skips the automatic integrity check and cleanup of technical/staging/ "
-            "after a run, so the original extracted files stick around until you "
-            "delete them yourself. Turn this off to let SMD verify and free that "
-            "disk space automatically once a run finishes successfully."
+        self.technical_view_hint = QLabel(
+            'Technical view: advanced settings and buttons for working data '
+            '(staging, reports, logs) — not your finished photos/videos.'
         )
-        stored_keep_staging = QSettings('SnapchatMemories', 'Downloader').value(
-            'keep_staging_files', False
+        self.technical_view_hint.setWordWrap(True)
+        self.technical_view_hint.setProperty('class', 'caption')
+
+        # Technical-only: copy logistics next to finished memories after a run.
+        self.add_run_info_chk = QCheckBox('Add run info to finished folder')
+        self.add_run_info_chk.setToolTip(
+            'After processing, copy a small SMK-run-info folder next to your '
+            'memories (JSON, reports, logs, README — not the large staging extract). '
+            'Useful for support or keeping a record of the run.'
         )
-        self.keep_staging_chk.setChecked(
-            str(stored_keep_staging).lower() in ('1', 'true', 'yes')
+        stored_run_info = QSettings('SnapchatMemories', 'Downloader').value(
+            'add_run_info', False
         )
-        self.keep_staging_chk.stateChanged.connect(self._on_keep_staging_changed)
-        self.keep_staging_hint = QLabel(
-            "Staging is the working copy SMD extracts from your export before "
-            "building merged/ and raw/. Leave unchecked to auto-verify and free "
-            "that disk space once a run succeeds."
+        self.add_run_info_chk.setChecked(
+            str(stored_run_info).lower() in ('1', 'true', 'yes')
         )
-        self.keep_staging_hint.setWordWrap(True)
-        self.keep_staging_hint.setProperty('class', 'caption')
+        self.add_run_info_chk.stateChanged.connect(self._on_add_run_info_changed)
+
+        # Technical-only: default remains auto-delete; this opts into Review duplicates.
+        self.manual_duplicate_review_chk = QCheckBox('Keep duplicates for review')
+        self.manual_duplicate_review_chk.setToolTip(
+            'When on, SMK still finds identical and look-alike duplicates but does not '
+            'delete them. After the run, use Review duplicates to choose what to keep. '
+            'When off (default), extras are removed automatically and the oldest name '
+            'in each group is kept.'
+        )
+        stored_manual = QSettings('SnapchatMemories', 'Downloader').value(
+            'manual_duplicate_review', False
+        )
+        self.manual_duplicate_review_chk.setChecked(
+            str(stored_manual).lower() in ('1', 'true', 'yes')
+        )
+        self.manual_duplicate_review_chk.stateChanged.connect(
+            self._on_manual_duplicate_review_changed
+        )
 
         run_box, run_lay = self._section('Run')
         run_body = QHBoxLayout()
+        run_body.setContentsMargins(0, 0, 0, 0)
         run_body.setSpacing(CONTROL_GAP)
-        self.download_btn = QPushButton('Start full processing')
+        self.download_btn = QPushButton('Start processing')
         self.download_btn.setObjectName('runAction')
         self.download_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.download_btn.setToolTip('Extract, merge overlays, embed metadata, and show a summary report')
+        self.download_btn.setToolTip(
+            'Extract, merge overlays, embed metadata, and show a summary report. '
+            'Creates the account folder if this is a new name.'
+        )
         self.download_btn.clicked.connect(self.on_download_button_clicked)
 
         run_options_col = QVBoxLayout()
+        run_options_col.setContentsMargins(0, 0, 0, 0)
         run_options_col.setSpacing(FIELD_GAP)
         run_options_col.addWidget(output_hint)
         run_options_col.addWidget(self.save_raw_chk)
         run_options_col.addWidget(self.technical_view_chk)
-        run_options_col.addWidget(self.keep_staging_chk)
-        run_options_col.addWidget(self.keep_staging_hint)
-        run_options_col.addStretch(1)
-        run_body.addLayout(run_options_col, 1)
-        run_body.addWidget(self.download_btn, 0, Qt.AlignVCenter | Qt.AlignRight)
+        run_options_col.addWidget(self.technical_view_hint)
+        run_options_col.addWidget(self.add_run_info_chk)
+        run_options_col.addWidget(self.manual_duplicate_review_chk)
+        # Technical storage sizes belong here (not in My Data) so toggling
+        # Technical view doesn't shove the zip section around.
+        self.technical_storage_label = QLabel('')
+        self.technical_storage_label.setProperty('class', 'caption')
+        self.technical_storage_label.setWordWrap(True)
+        run_options_col.addWidget(self.technical_storage_label)
+        self._run_options_host = QWidget()
+        self._run_options_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._run_options_host.setLayout(run_options_col)
+        run_body.addWidget(self._run_options_host, 1)
+        run_body.addWidget(self.download_btn, 0, Qt.AlignTop | Qt.AlignRight)
         run_body_host = QWidget()
-        run_body_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        run_body_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         run_body_host.setLayout(run_body)
-        run_lay.addWidget(run_body_host, 1)
+        run_lay.addWidget(run_body_host)
 
         run_footer = QHBoxLayout()
+        run_footer.setContentsMargins(0, 0, 0, 0)
         run_footer.setSpacing(CONTROL_GAP)
         self.action_header = QLabel('Ready to start?')
         self.action_header.setProperty('class', 'caption')
@@ -212,43 +306,40 @@ class SaveMemoriesTabMixin:
         run_lay.addLayout(run_footer)
 
         after_box, after_lay = self._section('After processing')
+        after_hint = QLabel(
+            'Acts on the account chosen above. With Technical view off you only see '
+            'Open finished folder and Where are my files? — Review duplicates and '
+            'Open debug appear when Technical view is on.'
+        )
+        after_hint.setProperty('class', 'caption')
+        after_hint.setWordWrap(True)
+        after_lay.addWidget(after_hint)
         after_grid = QGridLayout()
-        after_grid.setHorizontalSpacing(8)
-        after_grid.setVerticalSpacing(8)
+        after_grid.setContentsMargins(0, 0, 0, 0)
+        after_grid.setHorizontalSpacing(FIELD_GAP)
+        after_grid.setVerticalSpacing(FIELD_GAP)
         self.open_folder_btn = QPushButton('Open finished folder')
         self.open_folder_btn.setObjectName('toolbarBtn')
         self.open_folder_btn.setToolTip('Your finished photos and videos (with Snapchat filters)')
         self.open_folder_btn.clicked.connect(self.open_download_folder)
 
-        self.open_gallery_btn = QPushButton('View as gallery')
-        self.open_gallery_btn.setObjectName('toolbarBtn')
-        self.open_gallery_btn.setToolTip(
-            "Opens your first memory in the Windows Photos app - from there, use the "
-            "arrow keys or on-screen arrows to flip through every photo and video in the "
-            "folder, or start a slideshow. No separate gallery to maintain."
+        self.show_save_location_btn = QPushButton('Where are my files?')
+        self.show_save_location_btn.setObjectName('toolbarBtn')
+        self.show_save_location_btn.setToolTip(
+            'Shows the full path to your finished photos and videos for this account'
         )
-        self.open_gallery_btn.clicked.connect(self.open_gallery_view)
+        self.show_save_location_btn.clicked.connect(self.show_finished_folder_locations)
 
-        self.open_technical_btn = QPushButton('Open technical folder')
-        self.open_technical_btn.setObjectName('toolbarBtn')
-        self.open_technical_btn.setToolTip(
-            'Opens technical/ - staging, JSON, reports, checkpoint (can use a lot of disk space)'
-        )
-        self.open_technical_btn.clicked.connect(self.open_technical_folder)
-
-        self.verify_staging_btn = QPushButton('Verify staging')
-        self.verify_staging_btn.setObjectName('toolbarBtn')
-        self.verify_staging_btn.setToolTip(
-            'Checks that every memory in staging has output in merged/ and raw/ '
-            'before you delete technical/staging/ to free disk space'
-        )
-        self.verify_staging_btn.clicked.connect(self.verify_staging_readiness)
-
+        # Technical view only. Pipeline auto-removes duplicates unless
+        # "Keep duplicates for review" is on; this is the manual follow-up.
+        # (Open technical / Verify staging removed: Add run info copies logistics
+        # next to photos; staging cleanup runs automatically after a clean finish.)
         self.review_duplicates_btn = QPushButton('Review duplicates')
         self.review_duplicates_btn.setObjectName('toolbarBtn')
         self.review_duplicates_btn.setToolTip(
-            'Scan merged/ for byte-identical duplicates, tick the copies to keep per group, '
-            'then permanently delete the ones you did not keep (from both merged/ and raw/).'
+            'Look for duplicate copies still in your library (identical files or '
+            'the same picture/video saved twice). Use after a run with '
+            '"Keep duplicates for review" on, or to double-check.'
         )
         self.review_duplicates_btn.clicked.connect(self.review_duplicates)
 
@@ -258,13 +349,13 @@ class SaveMemoriesTabMixin:
         self.open_debug_btn.clicked.connect(self.open_debug_folder)
 
         after_grid.addWidget(self.open_folder_btn, 0, 0)
-        after_grid.addWidget(self.open_gallery_btn, 0, 1)
+        after_grid.addWidget(self.show_save_location_btn, 0, 1)
+        # Technical-only row (hidden unless Technical view is on).
         after_grid.addWidget(self.review_duplicates_btn, 1, 0)
-        after_grid.addWidget(self.open_technical_btn, 1, 1)
-        after_grid.addWidget(self.verify_staging_btn, 2, 0)
-        after_grid.addWidget(self.open_debug_btn, 2, 1)
+        after_grid.addWidget(self.open_debug_btn, 1, 1)
         after_lay.addLayout(after_grid)
 
+        self._account_section = account_box
         self._setup_section = setup_box
         self._perf_section = perf_box
         self._run_section = run_box
@@ -278,39 +369,60 @@ class SaveMemoriesTabMixin:
         self._process_controls_grid.setVerticalSpacing(_sg)
         controls_layout.addWidget(self._process_controls_grid_host)
         self._rebuild_process_controls_grid()
+        self._init_account_section()
         self._refresh_after_processing_actions()
 
         progress_box, progress_lay = self._section('Progress')
         progress_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.progress_section = progress_box
+
+        # Always-visible run stages (independent of the live run dashboard).
+        self._run_stage_num = 0
+        self._run_stage_total = 6
+        self.stage_title_label = QLabel('Stages appear here when you start processing.')
+        self.stage_title_label.setWordWrap(True)
+        self.stage_title_label.setTextFormat(Qt.RichText)
+        progress_lay.addWidget(self.stage_title_label)
+        self.stage_overview_label = QLabel('')
+        self.stage_overview_label.setProperty('class', 'caption')
+        self.stage_overview_label.setWordWrap(True)
+        self.stage_overview_label.setTextFormat(Qt.RichText)
+        progress_lay.addWidget(self.stage_overview_label)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat('%p%')
         self.progress_bar.setFixedHeight(28)
         progress_lay.addWidget(self.progress_bar)
 
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(CONTROL_GAP)
+        status_col = QVBoxLayout()
+        status_col.setContentsMargins(0, 0, 0, 0)
+        status_col.setSpacing(2)
         self.status_label = QLabel('Ready')
         self.status_label.setWordWrap(True)
-        progress_lay.addWidget(self.status_label)
-
+        status_col.addWidget(self.status_label)
         self.mode_status_label = QLabel('Mode: waiting')
         self.mode_status_label.setProperty('class', 'caption')
-        progress_lay.addWidget(self.mode_status_label)
-
+        status_col.addWidget(self.mode_status_label)
         self.download_details = QLabel('Files: 0/0 | Speed: - | ETA: -')
         self.download_details.setProperty('class', 'caption')
-        progress_lay.addWidget(self.download_details)
-
-        dashboard_row = QHBoxLayout()
-        dashboard_row.addStretch(1)
-        self.debug_output_toggle = QCheckBox('Show live run dashboard')
+        status_col.addWidget(self.download_details)
+        status_row.addLayout(status_col, 1)
+        # Avoid the word "dashboard" — Segoe UI Variable mis-kerns "oa" so
+        # "dashboard" renders with overlapping o/a on Windows.
+        self.debug_output_toggle = QCheckBox('Show live run panel')
         self.debug_output_toggle.setToolTip(
             'Shows a larger live panel with progress, time estimates, and activity messages during processing'
         )
         self.debug_output_toggle.setChecked(False)
         self.debug_output_toggle.stateChanged.connect(self.toggle_debug_output)
-        dashboard_row.addWidget(self.debug_output_toggle)
-        progress_lay.addLayout(dashboard_row)
+        status_row.addWidget(self.debug_output_toggle, 0, Qt.AlignTop | Qt.AlignRight)
+        progress_lay.addLayout(status_row)
 
         self.live_run_dashboard = LiveRunDashboard()
         self.live_run_dashboard.setVisible(self.debug_output_toggle.isChecked())
@@ -408,6 +520,7 @@ class SaveMemoriesTabMixin:
         self.performance_mode = mode_map.get(index, 'balanced')
         self._persist_perf_mode()
         self.refresh_system_profile()
+        self._refresh_time_estimate()
         self.update_export_ui_mode()
 
     def _persist_perf_mode(self) -> None:
@@ -418,7 +531,268 @@ class SaveMemoriesTabMixin:
             pass
 
     def _account_name(self) -> str:
-        return self.account_input.text().strip()
+        """The one account the whole tab acts on - set via the Account
+        section (New/Old account) and reused for both the next run and every
+        'After processing' button. See DECISIONS.md (2026-07-19, inline
+        Account toggle replaces the per-export dialog and the separate
+        'Selected account folder' selector).
+
+        In New account mode, a typed-but-not-yet-created name wins over any
+        leftover active folder so Start cannot silently write into the
+        previous account (e.g. typing Mary while Las was still active)."""
+        pending = self._pending_new_account_name()
+        if pending:
+            return pending
+        return getattr(self, '_active_account_name', '').strip()
+
+    def _pending_new_account_name(self) -> str:
+        """Folder name typed under New account, or '' if not applicable."""
+        if not getattr(self, 'new_account_radio', None):
+            return ''
+        if not self.new_account_radio.isChecked():
+            return ''
+        raw = ''
+        try:
+            raw = self.new_account_name_edit.text().strip()
+        except Exception:
+            return ''
+        if not raw or not self._is_valid_account_name(raw):
+            return ''
+        from smd.account_layout import ensure_memories_suffix
+
+        return ensure_memories_suffix(raw)
+
+    def _after_processing_account_name(self) -> str:
+        """Kept as a thin alias - After processing always acts on the same
+        active account as everything else now."""
+        return self._account_name()
+
+    def _list_known_accounts(self) -> list:
+        """Account folders that already exist on disk - in either layout
+        (Desktop/<name>/ simple, or <base_dir>/<name>/ technical) - so the
+        Account section's 'Old account' list and After processing always
+        have real accounts to offer, regardless of the live Technical view
+        toggle."""
+        from smd.account_layout import AccountPaths
+
+        names: set[str] = set()
+        base_dir_resolved = None
+        try:
+            base_dir = Path(self.get_download_base_dir())
+            base_dir_resolved = base_dir.resolve()
+            if base_dir.is_dir():
+                names.update(
+                    d.name
+                    for d in base_dir.iterdir()
+                    if d.is_dir() and not d.name.startswith('.')
+                )
+        except Exception:
+            pass
+
+        try:
+            desktop = Path.home() / 'Desktop'
+            internal_root = AccountPaths.internal_accounts_root()
+            if desktop.is_dir():
+                for d in desktop.iterdir():
+                    if not d.is_dir() or d.name.startswith('.'):
+                        continue
+                    # The Technical-mode base dir (e.g. Desktop/Memories,
+                    # containing real account subfolders like Las/, Mary/)
+                    # commonly sits directly on the Desktop - it is a
+                    # container, not an account itself, so it must never be
+                    # offered as one just because it's a non-empty folder.
+                    try:
+                        if base_dir_resolved is not None and d.resolve() == base_dir_resolved:
+                            continue
+                    except OSError:
+                        pass
+                    internal = internal_root / d.name
+                    if internal.is_dir() or any(d.iterdir()):
+                        names.add(d.name)
+        except Exception:
+            pass
+
+        return sorted(names, key=str.lower)
+
+    def _init_account_section(self) -> None:
+        """Pre-select a sensible Account section default at startup - the
+        last-used account under Existing account if one exists, else New
+        account. Existing account mode activates the shown folder automatically."""
+        last_account = ''
+        try:
+            last_account = str(
+                QSettings('SnapchatMemories', 'Downloader').value('last_account_name', '') or ''
+            ).strip()
+        except Exception:
+            pass
+        known = self._list_known_accounts()
+        if last_account and last_account in known:
+            self._old_account_candidate = last_account
+            self.old_account_radio.setChecked(True)
+        elif known:
+            self._old_account_candidate = known[-1]
+            self.old_account_radio.setChecked(True)
+        else:
+            self.new_account_radio.setChecked(True)
+        self._on_account_mode_toggled()
+        self._refresh_account_section()
+
+    def _set_active_account(self, account_name: str, *, create: bool = False) -> bool:
+        """Single point of truth for which account folder the whole tab acts
+        on. Creates the folder immediately when *create* is True (new
+        account, or confirming an old one), then refreshes every dependent
+        widget (Account banner, After processing enablement, Start button)."""
+        account_name = (account_name or '').strip()
+        if not account_name or not self._is_valid_account_name(account_name):
+            return False
+        if create:
+            try:
+                self._account_paths(account_name, create=True)
+            except Exception as exc:
+                QMessageBox.warning(self, 'Account', f'Could not create that folder:\n{exc}')
+                return False
+        self._active_account_name = account_name
+        try:
+            QSettings('SnapchatMemories', 'Downloader').setValue('last_account_name', account_name)
+        except Exception:
+            pass
+        self.update_download_path_label(account_name)
+        self._refresh_account_section()
+        self._refresh_after_processing_actions()
+        self._update_run_readiness()
+        if getattr(self, 'export_analysis', None):
+            self.update_export_ui_mode()
+        return True
+
+    def _refresh_account_section(self) -> None:
+        """Keep the Account section's banner and Existing account candidate in
+        sync with the active account and what's actually on disk, without
+        disturbing which radio the user has selected."""
+        from smd.account_layout import ensure_memories_suffix
+
+        active = self._account_name()
+        if active:
+            try:
+                paths = self._account_paths(active, create=False)
+                self.active_account_label.setText(
+                    f'<b>Active account:</b> {html.escape(active)} - saved to '
+                    f'{html.escape(str(paths.library_root))}'
+                )
+            except Exception:
+                self.active_account_label.setText(f'<b>Active account:</b> {html.escape(active)}')
+        else:
+            self.active_account_label.setText(
+                'No account selected yet - pick New account or Existing account above.'
+            )
+
+        known = self._list_known_accounts()
+        if known:
+            candidate = getattr(self, '_old_account_candidate', '') or active
+            if candidate not in known:
+                candidate = known[-1]
+            self._old_account_candidate = candidate
+            display_name = ensure_memories_suffix(candidate)
+            self.old_account_label.setText(
+                f'Your output folder is <b>{html.escape(display_name)}</b>'
+            )
+            # Beside the active-path banner — usable whenever prior accounts exist.
+            self.old_account_change_btn.setEnabled(True)
+        else:
+            self._old_account_candidate = ''
+            self.old_account_label.setText('No previous accounts found yet.')
+            self.old_account_change_btn.setEnabled(False)
+
+    def _on_account_mode_toggled(self, _checked: bool = False) -> None:
+        is_new = self.new_account_radio.isChecked()
+        self.new_account_name_edit.setEnabled(is_new)
+        can_existing = bool(self._list_known_accounts())
+        self.old_account_label.setEnabled(not is_new)
+        self.old_account_change_btn.setEnabled(can_existing)
+        if is_new:
+            # Drop the previous Existing-account selection so a typed name
+            # cannot be ignored while Start still writes into Las/etc.
+            self._active_account_name = ''
+            try:
+                self.technical_storage_label.setText('')
+            except Exception:
+                pass
+            self._refresh_account_section()
+            self._refresh_after_processing_actions()
+        self._on_new_account_name_changed(self.new_account_name_edit.text())
+        if not is_new and can_existing:
+            self._activate_existing_account_candidate(silent=True)
+        else:
+            self._update_run_readiness()
+
+    def _on_new_account_name_changed(self, text: str) -> None:
+        from smd.account_layout import ensure_memories_suffix
+
+        name = (text or '').strip()
+        if not getattr(self, 'new_account_radio', None) or not self.new_account_radio.isChecked():
+            self.new_account_preview_label.setText('')
+            self._update_run_readiness()
+            return
+        if not name:
+            self.new_account_preview_label.setText(
+                'Type a name — the folder is created when you Start processing.'
+            )
+        elif not self._is_valid_account_name(name):
+            self.new_account_preview_label.setText('Name cannot contain \\ / : * ? " < > |')
+        else:
+            folder = ensure_memories_suffix(name)
+            self.new_account_preview_label.setText(
+                f'Will save to: {folder} (created when you Start processing)'
+            )
+        self._refresh_account_section()
+        self._update_run_readiness()
+
+    def _activate_existing_account_candidate(self, *, silent: bool = False) -> None:
+        from smd.account_layout import (
+            ensure_memories_suffix,
+            rename_simple_mode_account,
+            rename_technical_mode_account,
+            resolve_existing_account_layout,
+        )
+
+        candidate = getattr(self, '_old_account_candidate', '') or self._account_name()
+        if not candidate:
+            if not silent:
+                QMessageBox.information(
+                    self, 'Existing account', 'No previous account folder yet.'
+                )
+            return
+        final_name = ensure_memories_suffix(candidate)
+        if final_name != candidate:
+            base_dir = Path(self.get_download_base_dir())
+            layout_info = resolve_existing_account_layout(candidate, base_dir)
+            try:
+                if layout_info and layout_info[0] == 'technical':
+                    rename_technical_mode_account(layout_info[1] or base_dir, candidate, final_name)
+                else:
+                    rename_simple_mode_account(candidate, final_name)
+            except Exception:
+                final_name = candidate
+        if self._set_active_account(final_name, create=False):
+            self._old_account_candidate = final_name
+            if not silent:
+                self._apply_status(self.status_label, f'Using "{final_name}".', 'ok')
+
+    def _on_old_account_change(self) -> None:
+        known = self._list_known_accounts()
+        if not known:
+            QMessageBox.information(
+                self, 'Change output folder', 'No previously processed accounts found yet.'
+            )
+            return
+        current = getattr(self, '_old_account_candidate', '') or self._account_name()
+        start_idx = known.index(current) if current in known else 0
+        name, ok = QInputDialog.getItem(
+            self, 'Change output folder', 'Choose an existing account:', known, start_idx, False
+        )
+        if ok and name:
+            self._old_account_candidate = name
+            self._refresh_account_section()
+            self._activate_existing_account_candidate(silent=True)
 
     @staticmethod
     def _is_valid_account_name(name: str) -> bool:
@@ -435,6 +809,7 @@ class SaveMemoriesTabMixin:
         already scrollable."""
         grid = self._process_controls_grid
         for section in (
+            self._account_section,
             self._setup_section,
             self._perf_section,
             self._run_section,
@@ -443,14 +818,16 @@ class SaveMemoriesTabMixin:
             grid.removeWidget(section)
             section.setParent(self._process_controls_grid_host)
 
-        technical = self._technical_view_enabled()
-        self._perf_section.setVisible(technical)
+        # Performance is always visible — Technical view only gates staging/
+        # reports/leftovers controls, not speed settings.
+        self._perf_section.setVisible(True)
         row = 0
+        grid.addWidget(self._account_section, row, 0)
+        row += 1
         grid.addWidget(self._setup_section, row, 0)
         row += 1
-        if technical:
-            grid.addWidget(self._perf_section, row, 0)
-            row += 1
+        grid.addWidget(self._perf_section, row, 0)
+        row += 1
         grid.addWidget(self._run_section, row, 0)
         row += 1
         grid.addWidget(self._after_section, row, 0)
@@ -458,12 +835,11 @@ class SaveMemoriesTabMixin:
 
     def _set_run_lockout(self, active: bool) -> None:
         """Dim and disable Setup/Performance/After-processing while a run is
-        active. Deliberately excludes the Run section (the Start/Cancel
-        button lives there and must stay clickable) and the Progress section
-        (the live dashboard must stay scrollable) - a previous full-window
-        overlay covered those too and made it impossible to scroll the log
-        or click Cancel while a run was in progress."""
+        active. Keeps Start/Cancel clickable, but locks Run option checkboxes
+        (Also save without filters / Technical view) so mid-run toggles cannot
+        change layout expectations. Progress stays scrollable."""
         for section in (
+            getattr(self, '_account_section', None),
             getattr(self, '_setup_section', None),
             getattr(self, '_perf_section', None),
             getattr(self, '_after_section', None),
@@ -479,6 +855,9 @@ class SaveMemoriesTabMixin:
                 effect.setOpacity(0.4)
             else:
                 section.setGraphicsEffect(None)
+        options_host = getattr(self, '_run_options_host', None)
+        if options_host is not None:
+            options_host.setEnabled(not active)
 
     def _set_keep_awake(self, active: bool) -> None:
         """Prevent Windows from sleeping the system or display while a run
@@ -488,7 +867,7 @@ class SaveMemoriesTabMixin:
         Motivated by a user report: some AMD GPUs render at a fraction of
         normal speed for a while after the display wakes from sleep (a
         known driver quirk - Ctrl+Shift+Win+B, which restarts the graphics
-        driver, is the common workaround). If SMD is mid-run when the
+        driver, is the common workaround). If SMK is mid-run when the
         monitor sleeps, that post-wake slowdown hits ffmpeg too. Keeping
         the display on for the run's duration avoids the wake cycle
         entirely instead of trying to detect/react to it. See
@@ -525,9 +904,14 @@ class SaveMemoriesTabMixin:
         elif not bundled:
             tip = 'This export has no media files. Request a new export from Snapchat.'
         elif not name:
-            tip = 'Enter a project folder name (shown on your Desktop).'
+            if getattr(self, 'new_account_radio', None) and self.new_account_radio.isChecked():
+                tip = 'Type a new account name above — Start processing creates the folder.'
+            else:
+                tip = 'Choose New account or Existing account in the Account section above first.'
         elif not valid_name:
             tip = 'Folder name cannot contain \\ / : * ? " < > |'
+        elif self._pending_new_account_name():
+            tip = f'Start will create "{name}" and process into that folder.'
         else:
             tip = 'Extract, merge overlays, embed metadata, and show a summary report'
         self.download_btn.setToolTip(tip)
@@ -540,26 +924,50 @@ class SaveMemoriesTabMixin:
         bundled = bool(analysis and analysis.is_bundled)
 
         if not analysis:
-            self.download_btn.setText('Start full processing')
+            self.download_btn.setText('Start processing')
             self.action_header.setText('Ready to start?')
+            self._refresh_time_estimate()
             self._update_run_readiness()
             return
 
+        self._refresh_time_estimate()
         settings = compute_workers(self.performance_mode, get_system_profile(), task='export')
         parts = len(analysis.zip_paths or [])
         technical = self._technical_view_enabled()
 
         if bundled:
-            self.download_btn.setText('Start full processing')
+            self.download_btn.setText('Start processing')
             self.action_header.setText('Ready to process?')
+            from smd.media_types import format_bytes
+
+            zip_n = parts
+            zip_label = f"{zip_n} Snapchat export ZIP(s)" if zip_n != 1 else "1 Snapchat export ZIP"
+            size_bit = (
+                f" ({format_bytes(analysis.zip_bytes)})"
+                if getattr(analysis, "zip_bytes", 0)
+                else ""
+            )
+            year_bit = ""
+            if analysis.year_min is not None and analysis.year_max is not None:
+                if analysis.year_min == analysis.year_max:
+                    year_bit = f" ({analysis.year_min})"
+                else:
+                    year_bit = f" ({analysis.year_min}–{analysis.year_max})"
+            url_bit = (
+                "Download URLs empty (bundled/offline - expected)."
+                if analysis.rows_with_link == 0
+                else f"{analysis.rows_with_link:,} JSON rows also list download URLs."
+            )
             worker_line = (
                 f"{settings.max_workers} parallel jobs • metadata, GPS, and overlays"
                 if technical
-                else 'metadata, GPS, and Snapchat filters included'
+                else "metadata, GPS, and Snapchat filters included"
             )
             self.export_summary_label.setText(
-                f"<b>Bundled export</b> - {parts} ZIP parts, "
-                f"~{analysis.main_file_count:,} media files, fully offline<br>"
+                f"✓ {zip_label} found{size_bit} — memories_history.json located inside. "
+                f"ZIPs are extracted automatically when processing starts.<br>"
+                f"✓ memories_history.json found — {analysis.json_rows:,} memories{year_bit}. "
+                f"{url_bit}<br>"
                 f"{worker_line}"
             )
             self.step_status_label.setText(
@@ -569,16 +977,62 @@ class SaveMemoriesTabMixin:
             self.export_summary_label.setObjectName('infoBanner')
             self.export_summary_label.setStyleSheet('')
         else:
-            self.download_btn.setText('Start full processing')
+            self.download_btn.setText('Start processing')
             self.action_header.setText('Export not supported')
+            detail = html.escape(analysis.message) if analysis.message else (
+                'This export does not include media files.'
+            )
             self.export_summary_label.setText(
-                '<b>This export does not include media files.</b><br>'
-                'Request a new Snapchat data export with memories included in the ZIP.'
+                f"<b>This export does not include media files.</b><br>{detail}<br>"
+                "Open the <b>Guide</b> tab for how to request a Memories export with media in the ZIP. "
+                "SMK stays offline-only (no CDN downloads)."
             )
             self.export_summary_label.setObjectName('infoBanner')
             self.export_summary_label.setStyleSheet('')
 
         self._update_run_readiness()
+
+    def _on_technical_view_changed(self, _state: int = 0) -> None:
+        super()._on_technical_view_changed(_state)
+        if getattr(self, 'export_analysis', None):
+            self.update_export_ui_mode()
+
+    def _on_add_run_info_changed(self, _state: int = 0) -> None:
+        QSettings('SnapchatMemories', 'Downloader').setValue(
+            'add_run_info',
+            bool(
+                getattr(self, 'add_run_info_chk', None)
+                and self.add_run_info_chk.isChecked()
+            ),
+        )
+
+    def _add_run_info_enabled(self) -> bool:
+        """Copy SMK-run-info/ after a run when Technical view + this checkbox."""
+        if not self._technical_view_enabled():
+            return False
+        chk = getattr(self, 'add_run_info_chk', None)
+        return chk is not None and chk.isChecked()
+
+    def _on_manual_duplicate_review_changed(self, _state: int = 0) -> None:
+        QSettings('SnapchatMemories', 'Downloader').setValue(
+            'manual_duplicate_review',
+            bool(
+                getattr(self, 'manual_duplicate_review_chk', None)
+                and self.manual_duplicate_review_chk.isChecked()
+            ),
+        )
+
+    def _auto_delete_duplicates_enabled(self) -> bool:
+        """Auto-delete unless Technical view + Keep duplicates for review."""
+        if not self._technical_view_enabled():
+            return True
+        chk = getattr(self, 'manual_duplicate_review_chk', None)
+        return not (chk is not None and chk.isChecked())
+
+    def _on_save_raw_changed(self, _state: int = 0) -> None:
+        super()._on_save_raw_changed(_state)
+        if getattr(self, 'export_analysis', None):
+            self.update_export_ui_mode()
 
     def _export_default_dir(self) -> str:
         default_dir = str(Path.home() / 'Downloads')
@@ -588,57 +1042,80 @@ class SaveMemoriesTabMixin:
             default_dir = str(Path.home())
         return default_dir
 
-    def _suggest_account_from_export(self, zip_paths):
-        from smd.export_detect import export_base_ids
+    @staticmethod
+    def _suggested_new_account_name(seed, zip_paths) -> str:
+        """Best-effort text to pre-fill the 'New account' name field - purely
+        from how the user organized files on disk (selected folder / ZIP
+        parent folder name), never from the export's own account info. SMK
+        does not read or require Snapchat account/profile data for naming;
+        the user names accounts themselves in the Account section."""
+        from smd.export_detect import is_usable_account_folder_name
 
-        bases = export_base_ids(zip_paths)
-        if not bases:
+        if not isinstance(seed, list):
+            folder = Path(seed)
+            if folder.is_dir() and is_usable_account_folder_name(folder.name):
+                return folder.name
+        if zip_paths:
+            parent_name = zip_paths[0].parent.name
+            if is_usable_account_folder_name(parent_name):
+                return parent_name
+        return ''
+
+    def _suggest_account_from_export(self, seed, zip_paths) -> None:
+        """Non-blocking nudge after picking an export: if this exact export
+        was already processed into a known account before (matched purely by
+        the export's own mydata~ID - technical bookkeeping, not personal
+        data - see DECISIONS.md), pre-select Existing account with that folder.
+        The user still sees and confirms the choice in the Account section -
+        nothing is created or renamed silently. Leaves the Account section
+        alone if an account is already active."""
+        from smd.export_detect import export_base_ids, find_existing_account_folder_name
+
+        if self._active_account_name:
             return
-        base_id = sorted(bases)[0]
-        short = base_id.replace("mydata~", "export-")
-        search_dirs = []
-        if self._technical_view_enabled():
-            base_dir = Path(self.get_download_base_dir())
-            if base_dir.is_dir():
-                search_dirs.append(base_dir)
-        else:
-            desktop = Path.home() / "Desktop"
-            if desktop.is_dir():
-                search_dirs.append(desktop)
 
-        for root in search_dirs:
-            for existing in root.iterdir():
-                if existing.is_dir() and short in existing.name.lower():
-                    self.account_input.setText(existing.name)
-                    self.update_download_path_label(existing.name)
-                    return
+        search_dirs: list[Path] = []
+        desktop = Path.home() / 'Desktop'
+        if desktop.is_dir():
+            search_dirs.append(desktop)
+        base_dir = Path(self.get_download_base_dir())
+        if base_dir.is_dir() and base_dir not in search_dirs:
+            search_dirs.append(base_dir)
 
-        if not self._account_name():
-            if "~" in base_id:
-                tail = base_id.split("~", 1)[-1][:8]
-                suggested = f"Memories {tail}" if tail else "My memories"
-            else:
-                suggested = "My memories"
-            self.account_input.setText(suggested)
-            self.update_download_path_label(suggested)
+        mydata_ids = export_base_ids(zip_paths)
+        match = find_existing_account_folder_name(search_dirs, identity=None, mydata_ids=mydata_ids)
+        known = self._list_known_accounts()
+        if match and match in known:
+            self._old_account_candidate = match
+            self.old_account_radio.setChecked(True)
+        elif not known:
+            self.new_account_radio.setChecked(True)
+            suggestion = self._suggested_new_account_name(seed, zip_paths)
+            if suggestion and not self.new_account_name_edit.text().strip():
+                self.new_account_name_edit.setText(suggestion)
+        self._refresh_account_section()
 
-    def show_processing_estimate(self):
+    def _refresh_time_estimate(self) -> None:
+        """Update the Performance section estimate label (no popup)."""
+        label = getattr(self, 'estimate_time_label', None)
+        if label is None:
+            return
         analysis = getattr(self, "export_analysis", None)
         if not analysis or not analysis.is_bundled:
-            QMessageBox.information(
-                self,
-                "Estimate",
-                "Select a bundled Snapchat export ZIP or folder first.",
+            label.setText(
+                'Estimated time: choose a Snapchat export folder to see a rough estimate.'
             )
+            self._last_estimate_label = None
             return
         from smd.system_profile import MODE_LABELS, get_system_profile
         from smd.time_estimate import estimate_bundled_processing
 
-        file_count = analysis.json_rows or analysis.main_file_count or 1
+        # Prefer ZIP media count over JSON rows — JSON often lists more rows
+        # than unique mains in the archive (Mary: 915 JSON vs 696 ZIP mains).
+        file_count = analysis.main_file_count or analysis.json_rows or 1
         account_name = self._account_name()
         needs_extract = True
         staging_gb = 0.0
-        zip_total_gb = 0.0
         if account_name:
             try:
                 paths = self._account_paths(account_name)
@@ -657,14 +1134,15 @@ class SaveMemoriesTabMixin:
             except Exception:
                 pass
 
-        # Hybrid estimate:
         overlay_fraction = 0.24
         if analysis.main_file_count and analysis.main_file_count > 0:
             overlay_fraction = min(
                 1.0, max(0.0, (analysis.overlay_file_count or 0) / analysis.main_file_count)
             )
 
-        video_fraction = 0.12
+        # Default assumes a video-heavy export (Las was ~62% video). Under-defaulting
+        # made old estimates look "minutes" when real runs took hours.
+        video_fraction = 0.40
         try:
             import tempfile
             from smd.export_detect import extract_json_from_zips
@@ -685,8 +1163,7 @@ class SaveMemoriesTabMixin:
             try:
                 zip_paths = analysis.zip_paths or []
                 if zip_paths:
-                    zip_total_gb = sum(p.stat().st_size for p in zip_paths) / (1024**3)
-                    staging_gb = zip_total_gb
+                    staging_gb = sum(p.stat().st_size for p in zip_paths) / (1024**3)
             except Exception:
                 pass
 
@@ -698,74 +1175,43 @@ class SaveMemoriesTabMixin:
             overlay_fraction=overlay_fraction,
             video_fraction=video_fraction,
         )
-
-        lines = [f"About {file_count:,} memories in this export.", ""]
-        if not needs_extract:
-            lines.append("Staging found on disk: ZIP extract should be skipped (faster).")
-        else:
-            if zip_total_gb > 0:
-                lines.append("No staging found: estimate includes ZIP extract time (rough).")
-            else:
-                lines.append("No staging found: estimate includes full ZIP extract.")
-        lines.append("")
-
-        lines.append(
-            f"Split: videos {int(video_fraction * 100)}%, overlays {int(overlay_fraction * 100)}% (from JSON and ZIP listing)."
+        mode = self.performance_mode
+        data = est.get(mode) or next(iter(est.values()), {})
+        mode_label = MODE_LABELS.get(mode, mode)
+        dur = str(data.get("label") or "?")
+        self._last_estimate_label = dur
+        extract_note = (
+            "ZIP unpack included"
+            if needs_extract
+            else "staging already on disk (faster)"
         )
-        lines.append("")
-        for mode, data in est.items():
-            lines.append(f"{MODE_LABELS[mode]}: about {data['label']} ({data['workers']} workers)")
-            note = str(data.get("note") or "")
-            if note:
-                lines.append(f"  {note}")
-        self._last_estimate_label = str(est.get(self.performance_mode, {}).get("label") or "")
-        QMessageBox.information(self, "Processing time estimate", "\n".join(lines))
-
-    def select_zip_files(self):
-        """Open file picker - one or many ZIP parts (multi-select)."""
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            'Select Snapchat ZIP files',
-            self._export_default_dir(),
-            'ZIP files (*.zip);;All files (*)',
+        label.setText(
+            f"Estimated time ({mode_label}): about {dur} for ~{file_count:,} memories "
+            f"({int(video_fraction * 100)}% video, {int(overlay_fraction * 100)}% with filters; "
+            f"{extract_note}). Rough guide only — based on file count and filter mix, "
+            f"not ZIP folder size (finished libraries are often smaller than the ZIPs)."
         )
-        if paths:
-            self._set_export_selection(paths)
 
-    def select_zip_folder(self):
-        """Open folder picker for a directory containing ZIP parts."""
+    def select_export_folder(self):
+        """Open folder picker for a directory containing all ZIP parts -
+        the one place to point SMK at your export (see DECISIONS.md,
+        2026-07-19, unifying 'Choose ZIP files'/'Choose folder')."""
         folder = QFileDialog.getExistingDirectory(
             self,
-            'Select folder with ZIP files',
+            'Select the folder with your Snapchat My Data ZIP file(s)',
             self._export_default_dir(),
         )
         if folder:
             self._set_export_selection(folder)
 
-    def _set_export_selection(self, path: str | list[str]):
-        from smd.export_detect import analyze_zip_export, export_base_ids, resolve_export_zip_paths
+    def _set_export_selection(self, path: str):
+        from smd.export_detect import analyze_zip_export, resolve_export_zip_paths
 
-        if isinstance(path, list):
-            paths = [Path(p) for p in path]
-            self.selected_zip = str(paths[0])
-        else:
-            paths = [Path(path)]
-            self.selected_zip = path
+        p = Path(path)
+        self.selected_zip = path
+        zip_paths = resolve_export_zip_paths(p)
 
-        p = paths[0]
-        zip_paths = resolve_export_zip_paths(paths if isinstance(path, list) else p)
-        if isinstance(path, list) and len(path) > 1:
-            bases = export_base_ids(zip_paths)
-            if len(bases) > 1:
-                QMessageBox.warning(
-                    self,
-                    'Different exports',
-                    'You selected ZIP files from more than one Snapchat export.\n'
-                    'Choose only files from the same export (same mydata ID).',
-                )
-                return
-
-        analysis = analyze_zip_export(path if isinstance(path, list) else p)
+        analysis = analyze_zip_export(p)
         self.export_analysis = analysis
         part_txt = f"{len(zip_paths)} ZIP parts" if len(zip_paths) > 1 else "1 ZIP"
         if analysis.is_bundled:
@@ -773,30 +1219,24 @@ class SaveMemoriesTabMixin:
         else:
             fmt = "No media in ZIP — request a new export from Snapchat"
 
-        if isinstance(path, list) and len(path) > 1:
-            label_name = f"{len(path)} files selected"
-        elif p.is_dir():
-            label_name = p.name + "/"
-        else:
-            label_name = p.name
-
+        label_name = p.name + "/" if p.is_dir() else p.name
         self.zip_label.setText(f'{label_name} ({fmt})')
         from smd.theme import apply_status_property
         apply_status_property(self.zip_label, 'ok')
-        self._suggest_account_from_export(zip_paths)
+        if analysis.is_bundled:
+            self._suggest_account_from_export(p, zip_paths)
         self.update_export_ui_mode()
 
     def get_default_base_dir(self):
-        """Default to Desktop/SMD Media as requested by user."""
-        desktop = Path.home() / 'Desktop' / 'SMD Media'
+        """Default to Desktop so accounts sit as Las-memories / Mary-memories."""
+        desktop = Path.home() / 'Desktop'
         try:
-             desktop.mkdir(parents=True, exist_ok=True)
-             return str(desktop)
+            desktop.mkdir(parents=True, exist_ok=True)
+            return str(desktop)
         except Exception:
-             # Fallback to Documents if Desktop fails
-             docs = Path.home() / 'Documents' / 'SMD Media'
-             docs.mkdir(parents=True, exist_ok=True)
-             return str(docs)
+            docs = Path.home() / 'Documents'
+            docs.mkdir(parents=True, exist_ok=True)
+            return str(docs)
 
     def get_download_base_dir(self):
         try:
@@ -805,60 +1245,107 @@ class SaveMemoriesTabMixin:
             if not base_dir:
                 base_dir = self.get_default_base_dir()
                 settings.setValue('download_base_dir', base_dir)
-            return str(base_dir)
+            from smd.account_layout import (
+                is_legacy_desktop_accounts_wrapper,
+                migrate_accounts_out_of_desktop_wrapper,
+            )
+
+            base_path = Path(str(base_dir))
+            # Always retire Desktop/Memories and Desktop/SMD Media — even when
+            # empty — otherwise mkdir(parents=True) for a new account recreates them.
+            if is_legacy_desktop_accounts_wrapper(base_path):
+                new_base, _actions = migrate_accounts_out_of_desktop_wrapper(base_path)
+                settings.setValue('download_base_dir', str(new_base))
+                return str(new_base)
+            return str(base_path)
         except Exception:
             return self.get_default_base_dir()
 
     def _account_paths(self, account_name: str, *, create: bool = False):
+        """
+        Resolve where *account_name* actually lives on disk. For an existing
+        account this always trusts what was persisted the first time it was
+        created (simple vs technical layout, and keep_raw) - never today's
+        live Technical view toggle - which is what used to make After
+        processing (and re-runs) silently look in the wrong folder whenever
+        the toggle didn't match how the account was originally made. See
+        DECISIONS.md (2026-07-19, persisted per-account layout).
+
+        A brand-new account (create=True, never seen before) picks up
+        today's toggle + "Also save without filters" checkbox and persists
+        that choice immediately, so every later call resolves consistently.
+        """
         from smd.account_layout import (
             AccountPaths,
             migrate_account_layout,
             migrate_flat_accounts_root,
+            migrate_flat_library_to_subfolders,
             normalize_account_dir,
             resolve_account_paths,
+            resolve_existing_account_layout,
+            save_account_layout_info,
         )
 
-        keep_raw = self.save_raw_chk.isChecked() if hasattr(self, 'save_raw_chk') else False
-        if self._technical_view_enabled():
-            base_dir = Path(self.get_download_base_dir())
+        live_keep_raw = self.save_raw_chk.isChecked() if hasattr(self, 'save_raw_chk') else False
+        current_base_dir = Path(self.get_download_base_dir())
+
+        existing = resolve_existing_account_layout(account_name, current_base_dir)
+        if existing is not None:
+            layout, base_dir, stored_keep_raw = existing
+            # A fresh run may add raw copies going forward; a lookup (After
+            # processing) trusts what's actually on disk over today's checkbox.
+            keep_raw = (live_keep_raw or stored_keep_raw) if create else stored_keep_raw
+        else:
+            layout = 'technical' if self._technical_view_enabled() else 'simple'
+            base_dir = current_base_dir if layout == 'technical' else None
+            keep_raw = live_keep_raw
+
+        if layout == 'technical':
+            base_dir = Path(base_dir or current_base_dir)
             if create:
                 migrate_flat_accounts_root(base_dir)
             account_dir = normalize_account_dir(base_dir / account_name)
             if create:
-                return resolve_account_paths(account_dir, migrate=True, create=True)
-            return AccountPaths.for_account(account_dir)
+                paths = resolve_account_paths(
+                    account_dir, migrate=True, create=True, keep_raw=keep_raw
+                )
+                if keep_raw:
+                    migrate_flat_library_to_subfolders(paths.library_root)
+                save_account_layout_info(
+                    paths.account_dir, layout='technical', base_dir=str(base_dir), keep_raw=keep_raw
+                )
+            else:
+                # create=False is still a read of a real, already-existing
+                # account - run migration (safe/idempotent: renames only,
+                # never invents folders) so a lookup made before the next
+                # "Start processing" run still finds legacy-layout
+                # files (old downloads/ name, old always-nested merged/).
+                paths = resolve_account_paths(
+                    account_dir, migrate=True, create=False, keep_raw=keep_raw
+                )
+            return paths
 
         paths = AccountPaths.for_user(account_name, keep_raw=keep_raw)
         if create:
             paths.ensure_user_dirs(keep_raw=keep_raw)
             migrate_account_layout(paths)
+            if keep_raw:
+                migrate_flat_library_to_subfolders(paths.library_root)
+            save_account_layout_info(paths.account_dir, layout='simple', keep_raw=keep_raw)
+        elif paths.account_dir.exists():
+            migrate_account_layout(paths)
         return paths
-
-    def _on_account_name_edited(self, _text: str) -> None:
-        """Update labels while typing without creating account folders on disk."""
-        name = self._account_name()
-        if not name:
-            return
-        self.update_download_path_label(name, create=False, storage_scan=False)
-        if self._technical_view_enabled():
-            self._pending_storage_account = name
-            self._storage_debounce_timer.start(400)
 
     def update_download_path_label(
         self, account_name: str, *, create: bool = False, storage_scan: bool = True
     ) -> None:
         try:
-            from smd.account_layout import format_bytes
-
             paths = self._account_paths(account_name, create=create)
-            if self._technical_view_enabled():
-                self.download_path_label.setText(f'Media: {paths.merged_dir}')
-            else:
-                self.download_path_label.setText(f'Saved to: {paths.library_root}')
             if not paths.account_dir.exists() and not create and not paths.library_root.exists():
                 self.technical_storage_label.setText(
                     'Technical: (folder is created when you start processing)'
                 )
+                self._refresh_after_processing_actions()
                 return
             if self._technical_view_enabled():
                 if storage_scan:
@@ -868,7 +1355,6 @@ class SaveMemoriesTabMixin:
             else:
                 self.technical_storage_label.setText('')
         except Exception:
-            self.download_path_label.setText('Folder: (unavailable)')
             self.technical_storage_label.setText('')
         self._refresh_after_processing_actions()
 
@@ -934,12 +1420,13 @@ class SaveMemoriesTabMixin:
             return False
 
     def _refresh_after_processing_actions(self) -> None:
-        """Enable After processing buttons only when the relevant project data exists."""
+        """Enable After processing buttons only when the relevant project data
+        exists for the active account - independent of Technical view, which
+        used to make these buttons resolve to the wrong folder entirely (see
+        DECISIONS.md, 2026-07-19, persisted per-account layout)."""
         buttons = (
             self.open_folder_btn,
-            self.open_gallery_btn,
-            self.open_technical_btn,
-            self.verify_staging_btn,
+            self.show_save_location_btn,
             self.review_duplicates_btn,
             self.open_debug_btn,
         )
@@ -961,25 +1448,16 @@ class SaveMemoriesTabMixin:
             return
 
         has_merged = self._folder_has_files(paths.merged_dir)
-        has_staging = self._folder_has_files(paths.staging_dir)
-        has_technical = paths.account_dir.is_dir() and paths.technical_dir.is_dir() and (
-            paths.json_path.exists()
-            or has_staging
-            or self._folder_has_files(paths.reports_dir)
-            or self._folder_has_files(paths.debug_dir)
-        )
         has_debug = self._folder_has_files(paths.debug_dir)
 
         self.open_folder_btn.setEnabled(has_merged)
-        self.open_gallery_btn.setEnabled(has_merged)
-        self.open_technical_btn.setEnabled(has_technical)
-        self.verify_staging_btn.setEnabled(has_staging)
+        self.show_save_location_btn.setEnabled(bool(account_name) and not busy)
         self.review_duplicates_btn.setEnabled(has_merged)
         self.open_debug_btn.setEnabled(has_debug)
 
     def open_download_folder(self):
         try:
-            account_name = self._account_name()
+            account_name = self._after_processing_account_name()
             if not account_name:
                 QMessageBox.information(self, 'Folder', 'Enter an account name first.'); return
             paths = self._account_paths(account_name)
@@ -991,151 +1469,55 @@ class SaveMemoriesTabMixin:
             except Exception:
                 pass
 
-    def open_gallery_view(self):
-        """Exploit the Windows Photos app as a zero-maintenance gallery: opening
-        one memory launches the OS default viewer, which lets the user arrow
-        through every photo/video in the same folder, zoom, and run a slideshow -
-        no custom gallery UI for SMD to build or maintain."""
+    def show_finished_folder_locations(self):
+        """Tell the user where finished photos/videos live for the active account."""
         try:
-            account_name = self._account_name()
+            account_name = self._after_processing_account_name()
             if not account_name:
-                QMessageBox.information(self, 'Gallery', 'Enter an account name first.')
-                return
-            paths = self._account_paths(account_name)
-            merged_dir = paths.merged_dir
-            if not merged_dir.is_dir():
                 QMessageBox.information(
-                    self, 'Gallery', 'No finished memories yet - run processing first.'
+                    self, 'Where are my files?', 'Choose an account first.'
                 )
                 return
-            from smd.media_types import MEDIA_EXTENSIONS
-
-            gallery_exts = MEDIA_EXTENSIONS | {'.webp'}
-            first_file = min(
-                (
-                    p
-                    for p in merged_dir.iterdir()
-                    if p.is_file() and p.suffix.lower() in gallery_exts
-                ),
-                key=lambda p: p.name.lower(),
-                default=None,
-            )
-            if first_file is None:
-                QMessageBox.information(
-                    self, 'Gallery', 'No photos or videos found in the finished folder.'
+            paths = self._account_paths(account_name, create=False)
+            lines = [
+                f'Account: {account_name}',
+                '',
+                'Your finished photos and videos (with Snapchat filters):',
+                str(paths.merged_dir),
+            ]
+            # Only mention raw/ when it sits under the user library (keep_raw
+            # on) - never the unused technical/raw_unused stub.
+            raw = paths.raw_dir
+            try:
+                raw_under_library = raw != paths.merged_dir and (
+                    raw == paths.library_root or paths.library_root in raw.parents
+                    or raw.parent == paths.library_root
                 )
-                return
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(first_file)))
+            except Exception:
+                raw_under_library = False
+            if raw_under_library and raw.is_dir() and any(raw.iterdir()):
+                lines.extend([
+                    '',
+                    'Also saved without filters (plain originals):',
+                    str(raw),
+                ])
+            lines.extend([
+                '',
+                'Tip: use "Open finished folder" to open that location in File Explorer.',
+            ])
+            QMessageBox.information(self, 'Where are my files?', '\n'.join(lines))
         except Exception as e:
             try:
-                QMessageBox.warning(self, 'Gallery Error', f'Could not open gallery view:\n{e}')
-            except Exception:
-                pass
-
-    def open_technical_folder(self):
-        try:
-            account_name = self._account_name()
-            if not account_name:
-                QMessageBox.information(self, 'Technical Folder', 'Enter an account name first.')
-                return
-            paths = self._account_paths(account_name)
-            paths.technical_dir.mkdir(parents=True, exist_ok=True)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.technical_dir)))
-        except Exception as e:
-            try:
-                QMessageBox.warning(self, 'Folder Error', f'Could not open technical folder:\n{e}')
-            except Exception:
-                pass
-
-    def verify_staging_readiness(self):
-        """Run staging completeness check; offer delete if safe."""
-        if self.download_running:
-            QMessageBox.information(
-                self,
-                'Verify staging',
-                'Wait until the current download/processing job finishes.',
-            )
-            return
-        account_name = self._account_name()
-        if not account_name:
-            QMessageBox.information(self, 'Verify staging', 'Enter an account name first.')
-            return
-        self.verify_staging_btn.setEnabled(False)
-        self._apply_status(self.status_label, 'Verifying staging folder…', 'info')
-        self._stop_worker('staging_check_worker')
-        self.staging_check_worker = StagingCheckWorker(
-            self._account_paths(account_name).account_dir
-        )
-        self.staging_check_worker.finished.connect(self.on_staging_check_finished)
-        self.staging_check_worker.error.connect(self.on_staging_check_error)
-        self.staging_check_worker.start()
-
-    def on_staging_check_error(self, message: str):
-        self._refresh_after_processing_actions()
-        self._apply_status(self.status_label, 'Staging verification failed.', 'err')
-        QMessageBox.critical(self, 'Verify staging', message)
-
-    def on_staging_check_finished(self, report):
-        from smd.account_layout import format_bytes
-        from smd.staging_check import delete_staging_folder
-
-        self._refresh_after_processing_actions()
-        account_name = self._account_name()
-        paths = self._account_paths(account_name)
-        self.update_download_path_label(account_name)
-
-        lines = report.summary_lines()
-        detail_parts = [lines[0], *lines[1:], ""]
-        for issue in report.issues:
-            detail_parts.append(f"[{issue.severity.upper()}] {issue.message}")
-            if issue.stems:
-                detail_parts.append("  e.g. " + ", ".join(issue.stems[:5]))
-        detail = "\n".join(detail_parts)
-        report_path = paths.reports_dir / "staging_readiness.json"
-
-        if report.safe_to_delete:
-            self._apply_status(self.status_label, 'Staging verified - safe to delete.', 'ok')
-            reply = QMessageBox.question(
-                self,
-                'Staging verified',
-                f"All {report.staging_main_count} memories have outputs in merged/ and raw/.\n\n"
-                f"Staging uses {format_bytes(report.staging_bytes)}.\n\n"
-                "Delete technical/staging/ now to free this space?\n"
-                "(You can re-extract from ZIPs later if needed.)",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply == QMessageBox.Yes:
-                ok, msg = delete_staging_folder(paths.account_dir, report=report, layout=paths)
-                if ok:
-                    self.update_download_path_label(account_name)
-                    self._apply_status(self.status_label, msg, 'ok')
-                    QMessageBox.information(self, 'Staging deleted', msg)
-                else:
-                    QMessageBox.warning(self, 'Delete staging', msg)
-            else:
-                QMessageBox.information(
-                    self,
-                    'Staging verified',
-                    f"Check passed. Report saved to:\n{report_path}\n\n"
-                    "You can delete technical/staging/ manually when ready.",
+                QMessageBox.warning(
+                    self, 'Where are my files?', f'Could not resolve the folder path:\n{e}'
                 )
-        else:
-            self._apply_status(self.status_label, 'Staging NOT safe to delete - see report.', 'warn')
-            box = QMessageBox(self)
-            box.setIcon(QMessageBox.Warning)
-            box.setWindowTitle('Staging not ready')
-            box.setText(
-                "Do not delete staging yet - some memories are missing or unfinished."
-            )
-            box.setInformativeText("\n".join(lines))
-            box.setDetailedText(detail)
-            box.exec_()
+            except Exception:
+                pass
 
     def open_debug_folder(self):
         """Open the debug folder for the current account"""
         try:
-            account_name = self._account_name()
+            account_name = self._after_processing_account_name()
             if not account_name:
                 QMessageBox.information(self, 'Debug Folder', 'Enter an account name first.')
                 return
@@ -1258,7 +1640,7 @@ class SaveMemoriesTabMixin:
             dash.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             dash.setMinimumHeight(0)
             dash.setMaximumHeight(16777215)
-            dash.log.setMinimumHeight(160)
+            dash.log.setMinimumHeight(320)
             dash.setVisible(True)
         else:
             dash.setVisible(False)
@@ -1277,7 +1659,7 @@ class SaveMemoriesTabMixin:
         self._apply_dashboard_visibility(visible)
         if visible and not self.live_run_dashboard.log.toPlainText():
             self.live_run_dashboard.log.appendPlainText(
-                f"[{datetime.now().strftime('%H:%M:%S')}] Live dashboard opened."
+                f"[{datetime.now().strftime('%H:%M:%S')}] 📊 Live run panel opened."
             )
             for line in self._run_log_buffer:
                 self.live_run_dashboard.log.appendPlainText(line)
@@ -1287,7 +1669,7 @@ class SaveMemoriesTabMixin:
 
         Kept in full (no in-memory cap) and also mirrored to a per-run log
         file on disk, so a run that lasts hours can still be scrolled back
-        to the very start, and remains reviewable even after SMD closes."""
+        to the very start, and remains reviewable even after SMK closes."""
         if not hasattr(self, "live_run_dashboard"):
             return
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1319,34 +1701,12 @@ class SaveMemoriesTabMixin:
         except OSError:
             self._run_log_path = None
 
-    def restore_account_name_field(self):
-        """Restore last project name as plain text (no scrollable dropdown)."""
-        try:
-            settings = QSettings('SnapchatMemories', 'Downloader')
-            recent = settings.value('recent_accounts', [])
-            if isinstance(recent, list) and recent:
-                last = recent[-1]
-                if isinstance(last, str) and last.strip():
-                    self.account_input.setText(last.strip())
-                    return
-            base_dir = Path(self.get_download_base_dir())
-            if base_dir.exists():
-                dirs = sorted(
-                    (d.name for d in base_dir.iterdir() if d.is_dir()),
-                    key=str.lower,
-                )
-                if len(dirs) == 1:
-                    self.account_input.setText(dirs[0])
-        except Exception:
-            pass
-
     def remember_account_name(self, name):
         """Store account name in settings."""
         try:
             name = name.strip()
             if not name:
                 return
-            self.account_input.setText(name)
 
             settings = QSettings('SnapchatMemories', 'Downloader')
             recent = settings.value('recent_accounts', [])
@@ -1368,21 +1728,53 @@ class SaveMemoriesTabMixin:
         if not self.selected_zip:
             QMessageBox.warning(self, 'Error', 'Please select a Snapchat export ZIP or folder')
             return
+        # New account with a typed name: create/select that folder now so we
+        # never fall back to a previous Existing account (Las vs Mary bug).
+        pending_new = self._pending_new_account_name()
+        if pending_new:
+            if not self._set_active_account(pending_new, create=True):
+                return
+            self.new_account_name_edit.clear()
         account_name = self._account_name()
         if not account_name:
-            QMessageBox.warning(self, 'Error', 'Please enter a project folder name')
+            QMessageBox.warning(
+                self,
+                'Error',
+                'No account selected.\n\n'
+                'Use the Account section above: pick "New account" and type a '
+                'name (Start processing creates the folder), or Existing account.',
+            )
             return
         if not self._is_valid_account_name(account_name):
             QMessageBox.warning(
                 self,
                 'Error',
-                'Project folder name cannot contain \\ / : * ? " < > |',
+                'That account name is not valid for Windows '
+                '(cannot contain \\ / : * ? " < > |). Re-select your export and pick a different name.',
             )
             return
 
         # Remember account name for future sessions
         self.remember_account_name(account_name)
         self.update_download_path_label(account_name)
+
+        analysis = getattr(self, 'export_analysis', None)
+        if analysis and analysis.zip_paths:
+            # Remembers which export (by mydata~ID - a technical batch id, not
+            # personal account data) populated this folder, so re-selecting
+            # the same export later can default to "Continue" for it.
+            try:
+                from smd.account_layout import save_account_identity
+                from smd.export_detect import export_base_ids
+
+                paths = self._account_paths(account_name, create=True)
+                save_account_identity(
+                    paths.account_dir,
+                    account_name=account_name,
+                    mydata_ids=sorted(export_base_ids(analysis.zip_paths)),
+                )
+            except Exception:
+                pass
 
         try:
             from smd.export_detect import analyze_zip_export, extract_json_from_zips, ExportFormat
@@ -1409,6 +1801,76 @@ class SaveMemoriesTabMixin:
                 return
 
             paths = self._account_paths(account_name, create=True)
+
+            zip_bytes = int(getattr(analysis, "zip_bytes", 0) or 0)
+            if zip_bytes <= 0 and analysis.zip_paths:
+                try:
+                    zip_bytes = sum(p.stat().st_size for p in analysis.zip_paths)
+                except OSError:
+                    zip_bytes = 0
+            # Soft warn only (never hard-block). Snapchat ZIPs are barely
+            # compressed (Las ~49 GB ZIPs ≈ 50.6 GB cloud; Mary ~6 GB ≈ library).
+            # Finished filters-only ≈ ~1× ZIP; with “Also save without filters”
+            # ≈ ~2× ZIP (Mary ~12 GB, Las ~97 GB). Staging (~1× ZIP) is temporary
+            # and deleted after a clean finish — peak can briefly exceed the
+            # finished size. +5 GB keeps Windows comfortable.
+            _OS_HEADROOM = 5 * 1024 * 1024 * 1024
+            _MIN_DISK_WARN_BYTES = 512 * 1024 * 1024
+            keep_raw = bool(self.save_raw_chk.isChecked())
+            copies = 2 if keep_raw else 1
+            suggested = int(zip_bytes) * copies + _OS_HEADROOM
+            if zip_bytes >= _MIN_DISK_WARN_BYTES:
+                from smd.media_types import format_bytes
+
+                def _free(path: Path) -> int | None:
+                    try:
+                        return shutil.disk_usage(str(path)).free
+                    except OSError:
+                        return None
+
+                free = _free(paths.library_root)
+                if free is None:
+                    free = _free(paths.technical_dir)
+                if free is not None and free < suggested:
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Warning)
+                    box.setWindowTitle('Low disk space')
+                    box.setText(
+                        'Free space on the output drive looks tight for this export.\n\n'
+                        'SMK unpacks to a temporary staging folder (about the ZIP size), '
+                        'then builds your finished library. Staging is removed after a '
+                        'successful run. Windows also needs a few GB free to stay smooth.'
+                    )
+                    if keep_raw:
+                        rule = (
+                            f'about 2× ZIP + ~5 GB '
+                            f'(filters copy + “without filters” copy + PC headroom)'
+                        )
+                        extra = (
+                            '\n\n“Also save without filters” is on — that keeps a second '
+                            'plain copy, so the finished folder is roughly twice the ZIP size.'
+                        )
+                    else:
+                        rule = 'about ZIP size + ~5 GB (finished library + PC headroom)'
+                        extra = (
+                            '\n\nFilters-only libraries usually end up near the ZIP size. '
+                            'Turn on “Also save without filters” only if you want a second copy.'
+                        )
+                    box.setInformativeText(
+                        f'Export ZIPs: {format_bytes(zip_bytes)}\n'
+                        f'Warn if under about: {format_bytes(suggested)} ({rule})\n'
+                        f'Free on output drive: {format_bytes(free)}'
+                        f'{extra}\n\n'
+                        'You can continue anyway if staging is already on disk or you '
+                        'will free space soon.'
+                    )
+                    continue_btn = box.addButton('Continue anyway', QMessageBox.AcceptRole)
+                    box.addButton('Cancel', QMessageBox.RejectRole)
+                    box.setDefaultButton(continue_btn)
+                    box.exec_()
+                    if box.clickedButton() is not continue_btn:
+                        return
+
             dest_json = paths.json_path
 
             if analysis.zip_paths:
@@ -1437,6 +1899,7 @@ class SaveMemoriesTabMixin:
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
             self.tabs.setCurrentIndex(self._tab_process)
+            self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             self.download_log_lines = []
             self._run_log_buffer = []
@@ -1463,10 +1926,6 @@ class SaveMemoriesTabMixin:
 
             merge_overlays = True
             keep_raw = self.save_raw_chk.isChecked()
-            if keep_raw and not self._technical_view_enabled():
-                from smd.account_layout import migrate_flat_library_to_subfolders
-
-                migrate_flat_library_to_subfolders(paths.library_root)
 
             self._apply_status(self.status_label, 'Bundled export detected. Processing locally (offline).', 'info')
             outputs = ['with filters']
@@ -1475,7 +1934,7 @@ class SaveMemoriesTabMixin:
             self.mode_status_label.setText(
                 f'Mode: Bundled local • outputs: {", ".join(outputs)} • metadata and GPS'
             )
-            self.step_status_label.setText('Step 1 of 5: preparing export and JSON')
+            self._set_run_stage(1, 6, 'Preparing export and metadata')
             QApplication.processEvents()
 
             self.local_export_worker = LocalExportWorker(
@@ -1488,64 +1947,139 @@ class SaveMemoriesTabMixin:
                 performance_mode=self.performance_mode,
                 zip_paths=analysis.zip_paths,
                 paths=paths,
+                auto_delete_duplicates=self._auto_delete_duplicates_enabled(),
             )
             self.local_export_worker.limit = 0
             self.local_export_worker.output.connect(self.on_download_output)
             self.local_export_worker.progress.connect(self.on_local_progress)
+            self.local_export_worker.stage.connect(self.on_local_stage)
             self.local_export_worker.finished.connect(self.on_download_finished)
             self.local_export_worker.start()
         except Exception as e:
             self.download_running = False
-            self.download_btn.setText('Start full processing')
+            self.download_btn.setText('Start processing')
             self._refresh_after_processing_actions()
             self._set_run_lockout(False)
             self._set_keep_awake(False)
             QMessageBox.critical(self, 'Error', str(e))
 
+    # Short titles + one-line blurbs for the always-visible Progress stages.
+    _RUN_STAGE_BLURBS = {
+        1: 'Reading your My Data export and memory list',
+        2: 'Unpacking photos and videos from the ZIP parts',
+        3: 'Linking each file to its date, GPS, and metadata',
+        4: 'Writing finished files with filters, dates, and GPS',
+        5: 'Looking for duplicate copies of the same photo or video',
+        6: 'Verifying files and preparing your summary',
+    }
+
+    def _set_run_stage(self, stage_num: int, stage_total: int, title: str) -> None:
+        """Update always-visible stage chrome and reset the progress bar."""
+        try:
+            stage_num = max(1, int(stage_num))
+            stage_total = max(stage_num, int(stage_total))
+        except (TypeError, ValueError):
+            return
+        self._run_stage_num = stage_num
+        self._run_stage_total = stage_total
+        title = (title or '').strip() or f'Stage {stage_num}'
+        blurb = self._RUN_STAGE_BLURBS.get(stage_num, '')
+        self.stage_title_label.setText(
+            f'<b>Stage {stage_num} of {stage_total}</b> — {html.escape(title)}'
+            + (f'<br><span style="font-weight:normal">{html.escape(blurb)}</span>' if blurb else '')
+        )
+        parts = []
+        short_names = {
+            1: 'Prepare',
+            2: 'Extract',
+            3: 'Match',
+            4: 'Save',
+            5: 'Duplicates',
+            6: 'Finish',
+        }
+        for n in range(1, stage_total + 1):
+            short = short_names.get(n, str(n))
+            if n < stage_num:
+                parts.append(f'✓ {short}')
+            elif n == stage_num:
+                parts.append(f'<b>→ {short}</b>')
+            else:
+                parts.append(f'· {short}')
+        self.stage_overview_label.setText('&nbsp;&nbsp;'.join(parts))
+        if hasattr(self, 'step_status_label'):
+            self.step_status_label.setText(f'Stage {stage_num} of {stage_total}: {title}')
+        # Each stage owns the bar: always determinate 0% → 100%.
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat('%p%')
+        self.dl_start_time = None
+        self._run_phase = title
+        self._refresh_run_dashboard(pct=0, phase=title, status=title)
+
+    def on_local_stage(self, stage_num: int, stage_total: int, title: str) -> None:
+        self._set_run_stage(stage_num, stage_total, title)
+
     def on_local_progress(self, current, total):
         import time as _t
 
-        if total > 0:
-            pct = int(current / total * 100)
-            self.progress_bar.setValue(pct)
-            self._apply_status(
-                self.status_label,
-                f'Merging and saving… {current:,} of {total:,}',
-                'info',
-            )
-            self.step_status_label.setText(f'Step 3 of 5: merging and saving ({pct}%)')
-            if self.dl_start_time is None and current > 0:
-                self.dl_start_time = _t.time()
-                self.dl_total_files = total
-            eta_str = '-'
-            speed_str = '-'
-            if self.dl_start_time and current > 0:
-                elapsed = _t.time() - self.dl_start_time
-                rate = current / elapsed
-                speed_str = f'{rate:.1f} files/s'
-                remaining = max(total - current, 0)
-                eta_sec = remaining / rate if rate > 0 else 0
-                if eta_sec > 3600:
-                    eta_str = f'{int(eta_sec // 3600)} hr {int((eta_sec % 3600) // 60)} min'
-                elif eta_sec > 60:
-                    eta_str = f'{int(eta_sec // 60)} min {int(eta_sec % 60)} sec'
-                else:
-                    eta_str = f'{int(eta_sec)} sec'
-            self.download_details.setText(
-                f'Files: {current:,}/{total:,} | Speed: {speed_str} | ETA: {eta_str}'
-            )
-            self.mode_status_label.setText(
-                f'Mode: Bundled local | Progress: {current:,}/{total:,} | ETA: {eta_str}'
-            )
-            self._refresh_run_dashboard(
-                pct=pct,
-                files_current=current,
-                files_total=total,
-                speed=speed_str,
-                eta=eta_str,
-                phase="Merging & saving",
-                status=f"Merging and saving… {current:,} of {total:,}",
-            )
+        try:
+            total = int(total)
+            current = int(current)
+        except (TypeError, ValueError):
+            return
+        if total <= 0:
+            return
+        current = max(0, min(current, total))
+        self.progress_bar.setRange(0, 100)
+        pct = int(current / total * 100)
+        if current >= total:
+            pct = 100
+        self.progress_bar.setValue(pct)
+        self.progress_bar.setFormat('%p%')
+        stage_n = getattr(self, '_run_stage_num', 0) or 4
+        if stage_n == 4:
+            status_txt = f'Saving… {current:,} of {total:,} ({pct}%)'
+        elif stage_n == 5:
+            status_txt = f'Checking duplicates… {current:,} of {total:,} ({pct}%)'
+        elif stage_n == 2:
+            status_txt = f'Extracting ZIP {current:,} of {total:,} ({pct}%)'
+        elif stage_n == 6:
+            status_txt = f'Finishing last touches… {pct}%'
+        else:
+            status_txt = f'{current:,} of {total:,} ({pct}%)'
+        self._apply_status(self.status_label, status_txt, 'info')
+        if self.dl_start_time is None and current > 0 and stage_n == 4:
+            self.dl_start_time = _t.time()
+            self.dl_total_files = total
+        eta_str = '-'
+        speed_str = '-'
+        if self.dl_start_time and current > 0 and stage_n == 4:
+            elapsed = _t.time() - self.dl_start_time
+            rate = current / elapsed
+            speed_str = f'{rate:.1f} files/s'
+            remaining = max(total - current, 0)
+            eta_sec = remaining / rate if rate > 0 else 0
+            if eta_sec > 3600:
+                eta_str = f'{int(eta_sec // 3600)} hr {int((eta_sec % 3600) // 60)} min'
+            elif eta_sec > 60:
+                eta_str = f'{int(eta_sec // 60)} min {int(eta_sec % 60)} sec'
+            else:
+                eta_str = f'{int(eta_sec)} sec'
+        self.download_details.setText(
+            f'Files: {current:,}/{total:,} | Speed: {speed_str} | ETA: {eta_str}'
+        )
+        self.mode_status_label.setText(
+            f'Mode: Bundled local | Progress: {current:,}/{total:,} ({pct}%) | ETA: {eta_str}'
+        )
+        self._refresh_run_dashboard(
+            pct=pct,
+            files_current=current,
+            files_total=total,
+            speed=speed_str,
+            eta=eta_str,
+            phase=getattr(self, '_run_phase', 'Working') or 'Working',
+            status=status_txt,
+        )
 
     def on_download_output(self, line):
         """Append worker log lines to the live dashboard."""
@@ -1563,23 +2097,27 @@ class SaveMemoriesTabMixin:
         self.update_export_ui_mode()
         self._refresh_after_processing_actions()
         self._set_run_lockout(False)
-        self.download_btn.setText('Start full processing')
+        self.download_btn.setText('Start processing')
         self.download_btn.setToolTip("Runs extract, merge, metadata, and reports in one flow")
         bundled = getattr(self, 'export_analysis', None) and getattr(self.export_analysis, 'is_bundled', False)
         if return_code == 0:
-            self.progress_bar.setValue(100)
-            msg = 'Processing completed successfully!'
-            self._apply_status(self.status_label, msg, "ok")
-            self._refresh_run_dashboard(
-                pct=100,
-                phase="Complete",
-                status=msg,
-                status_kind="ok",
+            # Files are saved, but verify/summary can still take a while -
+            # never tell the user "done" until that tidying finishes.
+            self._set_run_stage(6, 6, 'Finishing last touches')
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat('%p%')
+            msg = (
+                'Tidying up — verifying your files and preparing the summary. '
+                'Your memories are already saved; this last step can take a bit.'
             )
-            try:
-                play_happy_tone()
-            except Exception:
-                pass
+            self._apply_status(self.status_label, msg, 'info')
+            self._refresh_run_dashboard(
+                pct=0,
+                phase='Finishing last touches',
+                status=msg,
+                status_kind='info',
+            )
             self._show_completion_summary()
         else:
             # Success continues into verification/finalize below, which still
@@ -1599,15 +2137,15 @@ class SaveMemoriesTabMixin:
                         'Your disk ran out of space while processing.\n\n'
                         'Free up space on the output drive - merged/, raw/, and '
                         'technical/staging/ can be very large for big exports - then click '
-                        'Start again with the same project name. SMD resumes where it left '
+                        'Start again with the same project name. SMK resumes where it left '
                         'off and only processes the files that remain.'
                     )
                 elif 'permission' in tail_low:
                     error_msg = 'The app does not have permission to access that folder.\n\nCheck Windows security settings and try again.'
                 elif 'no module named' in tail_low or 'cannot import name' in tail_low:
                     error_msg = (
-                        'Processing is not available in this copy of SMD.\n\n'
-                        'Please install the latest version of Snapchat Memories Downloader.'
+                        'Processing is not available in this copy of SMK.\n\n'
+                        'Please install the latest version of Snapchat Memories Keeper.'
                     )
                 else:
                     error_msg = (

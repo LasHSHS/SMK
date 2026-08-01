@@ -1,16 +1,65 @@
-"""Single-instance lock so only one SMD window can run at a time."""
+"""Single-instance lock so only one SMK window can run at a time."""
 from __future__ import annotations
 
 import atexit
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import psutil
 
+from smd.branding import matches_window_title
+
 # Repo root (parent of gui/). Used to identify our own GUI script in process lists.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SMD_GUI_SCRIPT = (_REPO_ROOT / "desktop_gui_pyqt.py").resolve()
+
+
+def _focus_smk_windows() -> None:
+    """Best-effort: restore/focus/flash any visible SMK/legacy-SMD main window."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        EnumWindows = user32.EnumWindows
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        IsWindowVisible = user32.IsWindowVisible
+        GetWindowTextW = user32.GetWindowTextW
+        GetWindowTextLengthW = user32.GetWindowTextLengthW
+        IsIconic = user32.IsIconic
+        ShowWindow = user32.ShowWindow
+        SetForegroundWindow = user32.SetForegroundWindow
+        FlashWindow = user32.FlashWindow
+
+        SW_RESTORE = 9
+        found: list[int] = []
+
+        def _each(hwnd, _lparam):
+            if not IsWindowVisible(hwnd):
+                return True
+            length = GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value or ""
+            if matches_window_title(title):
+                found.append(int(hwnd))
+            return True
+
+        EnumWindows(EnumWindowsProc(_each), 0)
+        for hwnd in found:
+            if IsIconic(hwnd):
+                ShowWindow(hwnd, SW_RESTORE)
+            SetForegroundWindow(hwnd)
+            FlashWindow(hwnd, True)
+            print(f"DEBUG: Focused existing SMK hwnd={hwnd}")
+    except Exception as e:
+        print(f"DEBUG: _focus_smk_windows failed: {e}")
 
 
 def _cmdline_runs_smd_gui(cmdline: list) -> bool:
@@ -54,6 +103,25 @@ class SingleInstance:
         self.lock_file = None
         self.lock_path = Path(tempfile.gettempdir()) / 'snapchat_memories_gui.lock'
         self.signal_file = Path(tempfile.gettempdir()) / 'snapchat_memories_show.signal'
+
+    def request_show_existing(self) -> bool:
+        """Ask the running instance to foreground itself (Discord-style second launch).
+
+        Writes the show-signal file the live UI polls, and on Windows also tries
+        to focus any top-level window whose title starts with our product name
+        (works even if the UI thread is briefly busy). Returns True if a live
+        owner PID still holds the lock - callers must NOT kill that process.
+        """
+        try:
+            self.signal_file.write_text("show", encoding="utf-8")
+        except OSError as e:
+            print(f"DEBUG: Error writing signal file: {e}")
+
+        if sys.platform == "win32":
+            _focus_smk_windows()
+
+        owner = self._read_lock_pid()
+        return owner is not None and self._lock_owner_is_alive(owner)
         
     def force_takeover(self) -> None:
         """Terminate a stuck prior instance and clear the lock so we can start fresh."""

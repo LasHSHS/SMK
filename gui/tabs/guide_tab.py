@@ -20,7 +20,7 @@ class GuideTabMixin:
         guide_inner.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         guide_tab_layout = QVBoxLayout(guide_tab)
         guide_tab_layout.setContentsMargins(0, 0, 0, 0)
-        guide_tab_layout.addWidget(self._doc_tab(guide_inner))
+        guide_tab_layout.addWidget(self._doc_tab(guide_inner, fill_height=False))
         self.tabs.addTab(guide_tab, "Guide")
 
     def show_export_example(self):

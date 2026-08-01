@@ -1,4 +1,4 @@
-"""Runtime paths for portable / PyInstaller all-in-one SMD builds."""
+"""Runtime paths for portable / PyInstaller all-in-one SMK builds."""
 from __future__ import annotations
 
 import os

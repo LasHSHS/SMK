@@ -30,7 +30,7 @@ def support_options() -> list[SupportOption]:
         options.append(
             SupportOption(
                 "PayPal",
-                "One-time tip - only if you already use PayPal",
+                "One-time tip via PayPal donate",
                 PAYPAL_DONATE_URL,
                 "donate",
             )
@@ -66,7 +66,7 @@ def support_options() -> list[SupportOption]:
     options.append(
         SupportOption(
             "Star on GitHub",
-            "Free - helps others find SMD and shows what to improve",
+            "Free - helps others find SMK and shows what to improve",
             AUTHOR_URL,
             "free",
         )
@@ -80,7 +80,7 @@ def support_options_html() -> str:
     free = [o for o in support_options() if o.category == "free"]
 
     parts = [
-        "<p>SMD is free to use. <b>No payment is required.</b> If it saved you time, pick "
+        "<p>SMK is free to use. <b>No payment is required.</b> If it saved you time, pick "
         "whatever fits you - many people prefer free options like starring the project on GitHub.</p>",
     ]
     if donate:

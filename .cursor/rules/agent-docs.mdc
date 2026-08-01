@@ -1,11 +1,11 @@
 ---
-description: Read and maintain agent-docs/ARCHITECTURE.md and DECISIONS.md when working on SMD
+description: Read and maintain agent-docs/ARCHITECTURE.md and DECISIONS.md when working on SMK
 alwaysApply: true
 ---
 
 # Agent docs: read before, update after
 
-Before making changes or answering questions about how SMD behaves, read
+Before making changes or answering questions about how SMK behaves, read
 `agent-docs/ARCHITECTURE.md` (module map, data flow, gotchas) and
 `agent-docs/DECISIONS.md` (why non-obvious choices were made). They exist so
 you don't have to re-derive the whole codebase from scratch every session.

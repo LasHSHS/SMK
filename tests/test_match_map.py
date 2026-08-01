@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from smd.local_pipeline import (
     BundledMediaItem,
+    _restore_zip_entry_mtime,
     build_deterministic_match_map,
     build_match_map,
 )
@@ -142,3 +143,97 @@ def test_single_video_in_bucket_skips_capture_time_probe(monkeypatch):
     match_map = build_deterministic_match_map({item.stem: item}, [mem])
     assert match_map[item.stem] is mem
     assert calls == []
+
+
+def test_photo_positional_fallback_sorts_by_export_mtime(tmp_path):
+    """Same-day photos with no media id: ZIP entry mtimes track JSON Date
+    order. UID-stem order would swap these two (late UID sorts first)."""
+    import os
+    from pathlib import Path
+
+    uid_late_string = "aaaa0000-0000-0000-0000-000000000001"  # sorts FIRST
+    uid_early_string = "zzzz0000-0000-0000-0000-000000000002"  # sorts LAST
+    assert uid_late_string < uid_early_string
+
+    mem_early = _memory("2024-07-07 14:21:56 UTC", "Image")
+    mem_late = _memory("2024-07-07 17:20:48 UTC", "Image")
+
+    early_path = tmp_path / f"2024-07-07_{uid_early_string}-main.jpg"
+    late_path = tmp_path / f"2024-07-07_{uid_late_string}-main.jpg"
+    early_path.write_bytes(b"early")
+    late_path.write_bytes(b"late")
+    os.utime(early_path, (1_720_358_516, 1_720_358_516))  # ~14:21:56 UTC-ish order
+    os.utime(late_path, (1_720_369_248, 1_720_369_248))  # later
+
+    item_early = BundledMediaItem(
+        stem=f"2024-07-07_{uid_early_string}",
+        date_prefix="2024-07-07",
+        uid=uid_early_string,
+        main_path=early_path,
+        main_ext=".jpg",
+    )
+    item_late = BundledMediaItem(
+        stem=f"2024-07-07_{uid_late_string}",
+        date_prefix="2024-07-07",
+        uid=uid_late_string,
+        main_path=late_path,
+        main_ext=".jpg",
+    )
+    items = {item_early.stem: item_early, item_late.stem: item_late}
+
+    match_map = build_deterministic_match_map(items, [mem_early, mem_late])
+    assert match_map[item_early.stem] is mem_early
+    assert match_map[item_late.stem] is mem_late
+
+
+def test_photo_identical_mtimes_fall_back_to_uid_order(tmp_path):
+    """Stomped extracts (all mtimes equal) must not invent an order."""
+    import os
+
+    uid_a = "aaaa0000-0000-0000-0000-000000000001"
+    uid_z = "zzzz0000-0000-0000-0000-000000000002"
+    mem_early = _memory("2024-07-07 14:21:56 UTC", "Image")
+    mem_late = _memory("2024-07-07 17:20:48 UTC", "Image")
+
+    path_a = tmp_path / f"2024-07-07_{uid_a}-main.jpg"
+    path_z = tmp_path / f"2024-07-07_{uid_z}-main.jpg"
+    path_a.write_bytes(b"a")
+    path_z.write_bytes(b"z")
+    same = 1_720_000_000
+    os.utime(path_a, (same, same))
+    os.utime(path_z, (same, same))
+
+    item_a = BundledMediaItem(
+        stem=f"2024-07-07_{uid_a}",
+        date_prefix="2024-07-07",
+        uid=uid_a,
+        main_path=path_a,
+        main_ext=".jpg",
+    )
+    item_z = BundledMediaItem(
+        stem=f"2024-07-07_{uid_z}",
+        date_prefix="2024-07-07",
+        uid=uid_z,
+        main_path=path_z,
+        main_ext=".jpg",
+    )
+    items = {item_a.stem: item_a, item_z.stem: item_z}
+
+    # UID order: aaaa first → earliest JSON; zzzz → late JSON (wrong vs real
+    # capture, but honest fallback when mtimes are useless).
+    match_map = build_deterministic_match_map(items, [mem_early, mem_late])
+    assert match_map[item_a.stem] is mem_early
+    assert match_map[item_z.stem] is mem_late
+
+
+def test_restore_zip_entry_mtime(tmp_path):
+    import zipfile
+
+    dest = tmp_path / "x.jpg"
+    dest.write_bytes(b"x")
+    info = zipfile.ZipInfo("memories/x.jpg")
+    info.date_time = (2024, 7, 7, 14, 21, 56)
+    _restore_zip_entry_mtime(dest, info)
+    got = datetime.fromtimestamp(dest.stat().st_mtime)
+    assert got.year == 2024 and got.month == 7 and got.day == 7
+    assert got.hour == 14 and got.minute == 21 and got.second == 56

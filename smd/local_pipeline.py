@@ -33,6 +33,43 @@ MEDIA_RE = re.compile(
     re.I,
 )
 
+# If every file in a same-day photo bucket shares nearly the same mtime, the
+# extract stomped ZIP entry times (useless for ordering). Require at least this
+# spread before trusting mtime sort over UID-stem order.
+_MTIME_SPREAD_TRUST_SECONDS = 2.0
+
+
+def _restore_zip_entry_mtime(dest: Path, info: zipfile.ZipInfo) -> None:
+    """Set extracted file mtime from the ZIP entry's DOS timestamp.
+
+    Snapchat stores capture-related clock digits in these entry times. Matching
+    same-day photos depends on preserving them (see build_deterministic_match_map).
+    zipfile extraction alone leaves "now" as mtime.
+    """
+    try:
+        ts = datetime(*info.date_time).timestamp()
+    except (OverflowError, ValueError, OSError):
+        return
+    try:
+        os.utime(dest, (ts, ts))
+    except OSError:
+        pass
+
+
+def _file_mtime(path: Path | None) -> float | None:
+    if path is None:
+        return None
+    try:
+        if path.is_file():
+            return path.stat().st_mtime
+    except OSError:
+        return None
+    return None
+
+
+class PipelineCancelled(Exception):
+    """User requested stop; abort remaining pipeline stages without failing hard."""
+
 
 @dataclass
 class LocalProcessStats:
@@ -52,6 +89,19 @@ class LocalProcessStats:
     files_disambiguated: int = 0
     collision_avoided: int = 0
     integrity_repairs: int = 0
+    # Plain-language accounting for the summary (Snapchat list vs ZIP vs library).
+    json_row_count: int = 0
+    staging_mains_before_dedupe: int = 0
+    staging_byte_dupes_removed: int = 0
+    staging_visual_dupes_removed: int = 0
+    post_byte_files_deleted: int = 0
+    post_visual_files_deleted: int = 0
+    this_run_processed: int = 0
+    library_kept: int = 0
+    stopped_by_user: bool = False
+    skipped_already_complete: bool = False
+    auto_delete_duplicates: bool = True
+    duplicate_groups_left_for_review: int = 0
 
     def summary_lines(self) -> list[str]:
         lines = [
@@ -66,6 +116,35 @@ class LocalProcessStats:
             f"Failed: {self.failed}",
             f"JSON matched: {self.json_matched} / unmatched: {self.json_unmatched}",
         ]
+        staging_removed = (
+            self.staging_byte_dupes_removed + self.staging_visual_dupes_removed
+        )
+        post_deleted = self.post_byte_files_deleted + self.post_visual_files_deleted
+        kept = self.library_kept or self.json_matched
+        if self.json_row_count or staging_removed or post_deleted or kept or self.this_run_processed:
+            zip_mains = self.staging_mains_before_dedupe
+            lines.append(
+                f"Counts: Snapchat JSON listed {self.json_row_count:,} rows; "
+                f"ZIP had {zip_mains:,} media files; "
+                f"removed {staging_removed:,} duplicate staged copies early; "
+                f"this run processed {self.this_run_processed:,}; "
+                f"library has {kept:,}; "
+                f"post-check deleted {post_deleted:,} extra files."
+            )
+        if self.skipped_already_complete:
+            lines.append(
+                "Library was already complete — skipped ZIP extract and re-encoding."
+            )
+        if not self.auto_delete_duplicates:
+            lines.append(
+                "Duplicate auto-delete was off — extras left for Review duplicates."
+            )
+        if self.duplicate_groups_left_for_review:
+            lines.append(
+                f"Duplicate groups left for review: {self.duplicate_groups_left_for_review}."
+            )
+        if self.stopped_by_user:
+            lines.append("Stopped by user before finishing all stages.")
         if self.collision_groups:
             lines.append(
                 f"Filename collisions resolved: {self.collision_groups} groups, "
@@ -135,7 +214,7 @@ def build_deterministic_match_map(
     ``build_match_map``).
 
     Videos: sorted by each file's own embedded ``creation_time`` (read
-    straight off the staged file, before SMD writes anything) when ffprobe
+    straight off the staged file, before SMK writes anything) when ffprobe
     can read one. This is the phone's own recorded capture instant, and it
     reliably tracks the same chronological order as the JSON rows' ``Date``
     field even though the two are never identical (Date lags capture by a
@@ -143,11 +222,11 @@ def build_deterministic_match_map(
     can't read falls back to UID-stem order, sorted after all timed videos
     so it can't silently displace one that IS correctly ordered.
 
-    Images: Snapchat strips EXIF entirely from exported photos - there is
-    no per-file signal to sort by, so this remains UID-stem order and can
-    still mismatch same-day multi-photo bursts. See agent-docs/DECISIONS.md
-    ("2026-07-14 - video matching uses each file's own creation_time") for
-    the investigation that found this and why photos can't be fully fixed.
+    Images: Snapchat strips EXIF from exported photos, but ZIP entry mtimes
+    (preserved by ``_restore_zip_entry_mtime``) carry capture-related clock
+    digits that track JSON ``Date`` order within a day. When those mtimes are
+    usable (not all identical from a stomped extract), same-day photos are
+    sorted by file mtime; otherwise UID-stem order remains the fallback.
 
     Stable across runs and resume - no FIFO consumption drift.
     """
@@ -199,6 +278,19 @@ def build_deterministic_match_map(
                     x[0],
                 )
             )
+        elif mtype == "image" and len(group) > 1:
+            mtimes = {
+                stem: _file_mtime(item.main_path) for stem, item in group
+            }
+            known = [t for t in mtimes.values() if t is not None]
+            use_mtime = (
+                len(known) == len(group)
+                and (max(known) - min(known)) >= _MTIME_SPREAD_TRUST_SECONDS
+            )
+            if use_mtime:
+                group.sort(key=lambda x: (mtimes[x[0]], x[0]))
+            else:
+                group.sort(key=lambda x: x[0])
         else:
             group.sort(key=lambda x: x[0])
 
@@ -459,30 +551,83 @@ def reconcile_checkpoint_with_disk(
     raw_dir: Path | None = None,
     *,
     keep_raw: bool = False,
+    output_by_stem: dict[str, str] | None = None,
 ) -> tuple[set[str], set[str], list[str]]:
     """
     Drop completed stems whose output files are missing on disk.
     Checks merged/ always, and raw/ too when keep_raw is requested, so a
     checkpoint can never permanently hide a missing raw copy.
+
+    Prefers the filename recorded in ``output_by_stem`` (what was actually
+    written). If that file exists but the current match plan wants a new
+    name, rename into the planned name so prune/verify stay consistent.
     """
+    recorded = output_by_stem if output_by_stem is not None else {}
     missing: list[str] = []
     for stem in sorted(done_stems):
         item = items.get(stem)
         planned = output_names.get(stem)
-        if not item or not item.main_path or not planned:
+        recorded_name = recorded.get(stem)
+        if not item or not item.main_path or not (planned or recorded_name):
             missing.append(stem)
             continue
-        if not stem_has_output_on_disk(stem, item, planned, merged_dir):
+
+        # Prefer on-disk recorded name; migrate to current planned if needed.
+        if recorded_name and stem_has_output_on_disk(
+            stem, item, recorded_name, merged_dir
+        ):
+            if planned and planned != recorded_name:
+                _migrate_output_filename(
+                    recorded_name, planned, merged_dir, raw_dir if keep_raw else None
+                )
+                recorded[stem] = planned
+            check_name = planned or recorded_name
+        elif planned and stem_has_output_on_disk(stem, item, planned, merged_dir):
+            recorded[stem] = planned
+            check_name = planned
+        else:
             missing.append(stem)
             continue
+
         if keep_raw and raw_dir is not None:
             ext = _preferred_output_ext(item.main_ext or item.main_path.suffix.lower())
-            raw_name = _resolve_output_filename(planned, ext)
+            raw_name = _resolve_output_filename(check_name, ext)
             if not _output_file_valid(raw_dir / raw_name):
                 missing.append(stem)
+                continue
     if missing:
         done_stems = done_stems - set(missing)
+        for stem in missing:
+            recorded.pop(stem, None)
     return done_stems, skipped_stems, missing
+
+
+def _migrate_output_filename(
+    old_name: str,
+    new_name: str,
+    merged_dir: Path,
+    raw_dir: Path | None,
+) -> None:
+    """Rename merged/raw outputs when the planned name changes after rematch."""
+    if not old_name or not new_name or old_name == new_name:
+        return
+    for folder in (merged_dir, raw_dir):
+        if folder is None or not folder.is_dir():
+            continue
+        src = folder / old_name
+        dest = folder / new_name
+        if not src.is_file():
+            continue
+        if dest.exists():
+            continue
+        try:
+            src.rename(dest)
+        except OSError:
+            try:
+                shutil.copy2(src, dest)
+                src.unlink()
+            except OSError:
+                pass
 
 
 def prune_stale_outputs(
@@ -515,23 +660,46 @@ def _resolve_output_filename(planned: str, actual_ext: str) -> str:
     return f"{Path(planned).stem}{actual_ext}"
 
 
-def _load_checkpoint(path: Path) -> tuple[set[str], set[str], int]:
+def _load_checkpoint(path: Path) -> tuple[set[str], set[str], int, dict[str, str]]:
+    """Return completed stems, skipped stems, version, and stem→output filename map.
+
+    ``output_by_stem`` records the filename written when each stem was marked
+    done. Verify/resume must honour that name even if a later rematch would
+    assign a different planned name (match drift after power-loss resume).
+    """
     if not path.exists():
-        return set(), set(), 0
+        return set(), set(), 0, {}
     try:
         ck = json.loads(path.read_text(encoding="utf-8"))
+        raw_outputs = ck.get("output_by_stem") or {}
+        output_by_stem = {
+            str(stem): str(name)
+            for stem, name in raw_outputs.items()
+            if stem and name
+        }
         return (
             set(ck.get("completed_stems", [])),
             set(ck.get("skipped_stems", [])),
             int(ck.get("version", 1)),
+            output_by_stem,
         )
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
-        return set(), set(), 0
+        return set(), set(), 0, {}
 
 
-def _save_checkpoint(path: Path, completed: set[str], skipped: set[str]) -> None:
+def _save_checkpoint(
+    path: Path,
+    completed: set[str],
+    skipped: set[str],
+    output_by_stem: dict[str, str] | None = None,
+) -> None:
     from smd.fsutil import atomic_write_text
 
+    outputs = {
+        stem: name
+        for stem, name in (output_by_stem or {}).items()
+        if stem in completed and name
+    }
     atomic_write_text(
         path,
         json.dumps(
@@ -539,16 +707,87 @@ def _save_checkpoint(path: Path, completed: set[str], skipped: set[str]) -> None
                 "version": CHECKPOINT_VERSION,
                 "completed_stems": sorted(completed),
                 "skipped_stems": sorted(skipped),
+                "output_by_stem": dict(sorted(outputs.items())),
             },
             indent=2,
         ),
     )
 
 
+def list_zip_main_stems(zip_paths: list[Path]) -> set[str]:
+    """Cheap namelist-only scan of unique ``*-main`` stems across ZIP parts."""
+    stems: set[str] = set()
+    for zpath in zip_paths:
+        try:
+            zf = zipfile.ZipFile(zpath, "r")
+        except (zipfile.BadZipFile, OSError):
+            continue
+        with zf:
+            for name in zf.namelist():
+                if not name.startswith("memories/") or name.endswith("/"):
+                    continue
+                fname = Path(name).name
+                m = MEDIA_RE.match(fname)
+                if not m or m.group("role").lower() != "main":
+                    continue
+                stems.add(f"{m.group('date')}_{m.group('uid')}")
+    return stems
+
+
+def checkpoint_outputs_present(
+    done_stems: set[str],
+    output_by_stem: dict[str, str],
+    merged_dir: Path,
+    raw_dir: Path,
+    *,
+    keep_raw: bool,
+) -> bool:
+    """True when every checkpoint-done stem has a valid merged (and raw) file."""
+    if not done_stems:
+        return False
+    for stem in done_stems:
+        name = output_by_stem.get(stem)
+        if not name or not _output_file_valid(merged_dir / name):
+            return False
+        if keep_raw and not _output_file_valid(raw_dir / name):
+            return False
+    return True
+
+
+def library_already_complete(
+    zip_paths: list[Path],
+    *,
+    done_stems: set[str],
+    skipped_stems: set[str],
+    output_by_stem: dict[str, str],
+    reports_dir: Path,
+    merged_dir: Path,
+    raw_dir: Path,
+    keep_raw: bool,
+) -> tuple[bool, set[str]]:
+    """Whether ZIP mains are fully accounted for and outputs exist on disk.
+
+    Returns ``(complete, zip_main_stems)``. Accounts for stems removed by prior
+    staging auto-dedupe so a finished library is not forced to re-extract.
+    """
+    from smd.duplicates import load_staging_removed_stems
+
+    zip_stems = list_zip_main_stems(zip_paths)
+    if not zip_stems or not done_stems:
+        return False, zip_stems
+    if not checkpoint_outputs_present(
+        done_stems, output_by_stem, merged_dir, raw_dir, keep_raw=keep_raw
+    ):
+        return False, zip_stems
+    accounted = done_stems | skipped_stems | load_staging_removed_stems(reports_dir)
+    return zip_stems.issubset(accounted), zip_stems
+
+
 def extract_media_from_zips(
     zip_paths: list[Path],
     staging_dir: Path,
     status: Callable[[str], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[dict[str, BundledMediaItem], LocalProcessStats]:
     """Extract memories/ media from all ZIP parts with deduplication."""
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -558,10 +797,16 @@ def extract_media_from_zips(
 
     from smd.fsutil import tmp_sibling
 
-    for zpath in zip_paths:
+    def _stop() -> bool:
+        return bool(should_stop and should_stop())
+
+    zip_total = len(zip_paths)
+    for zip_i, zpath in enumerate(zip_paths, start=1):
+        if _stop():
+            raise PipelineCancelled()
         stats.zips_processed += 1
         if status:
-            status(f"Extracting {zpath.name}...")
+            status(f"Extracting ZIP {zip_i}/{zip_total}: {zpath.name}")
         try:
             zf = zipfile.ZipFile(zpath, "r")
         except (zipfile.BadZipFile, OSError) as e:
@@ -572,6 +817,8 @@ def extract_media_from_zips(
             ) from e
         with zf:
             for name in zf.namelist():
+                if _stop():
+                    raise PipelineCancelled()
                 if not name.startswith("memories/") or name.endswith("/"):
                     continue
                 fname = Path(name).name
@@ -595,6 +842,7 @@ def extract_media_from_zips(
                     with zf.open(name) as src, open(tmp, "wb") as out:
                         shutil.copyfileobj(src, out)
                     os.replace(tmp, dest)
+                    _restore_zip_entry_mtime(dest, info)
                 finally:
                     if tmp.exists():
                         try:
@@ -654,6 +902,7 @@ def _get_staging_items(
     staging_dir: Path,
     status: Callable[[str], None] | None = None,
     legacy_staging_dir: Path | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[dict[str, BundledMediaItem], LocalProcessStats]:
     """Extract ZIPs or reuse existing staging (fast resume)."""
     existing = _load_items_from_staging(staging_dir)
@@ -671,7 +920,28 @@ def _get_staging_items(
         stats = LocalProcessStats(zips_processed=len(zip_paths))
         stats.files_extracted = len(existing) * 2  # approximate main+overlay rows
         return existing, stats
-    return extract_media_from_zips(zip_paths, staging_dir, status)
+    return extract_media_from_zips(
+        zip_paths, staging_dir, status, should_stop=should_stop
+    )
+
+
+def _count_library_files(merged_dir: Path) -> int:
+    if not merged_dir.is_dir():
+        return 0
+    return sum(1 for p in merged_dir.iterdir() if p.is_file())
+
+
+def _finalize_library_counts(
+    stats: LocalProcessStats,
+    *,
+    done_stems: set[str],
+    this_run_processed: int,
+    merged_dir: Path,
+) -> None:
+    """Fill honest library / this-run counters for logs and the session summary."""
+    stats.this_run_processed = this_run_processed
+    on_disk = _count_library_files(merged_dir)
+    stats.library_kept = max(len(done_stems), on_disk, stats.json_matched)
 
 
 def _fix_extension(path: Path) -> Path:
@@ -1007,6 +1277,7 @@ def _apply_item_outcome(
     done_stems: set[str],
     skipped_stems: set[str],
     report_entries: list[dict],
+    output_by_stem: dict[str, str] | None = None,
 ) -> None:
     stats.merged += out.merged
     stats.raw_copied += out.raw_copied
@@ -1023,8 +1294,68 @@ def _apply_item_outcome(
         skipped_stems.add(out.stem)
     elif out.done:
         done_stems.add(out.stem)
+        if output_by_stem is not None and out.report_entry:
+            name = out.report_entry.get("output")
+            if name:
+                output_by_stem[out.stem] = str(name)
     if out.report_entry:
         report_entries.append(out.report_entry)
+
+
+# Machine-readable stage markers for the GUI progress UI. Format:
+#   __SMD_STAGE__|<n>|<total>|<short title>
+#   __SMD_PROGRESS__|<current>|<total>   (fills the per-stage 0-100% bar)
+# Total includes the post-run "Finishing last touches" stage owned by the GUI
+# (not this pipeline), so the bar can show "Stage 1 of 6" from the first emit.
+SMD_STAGE_MARKER = "__SMD_STAGE__"
+SMD_PROGRESS_MARKER = "__SMD_PROGRESS__"
+SMD_RUN_STAGE_TOTAL = 6
+
+
+def _apply_duplicate_scan_result(
+    report,
+    *,
+    kind: str,
+    auto_delete: bool,
+    keep_raw: bool,
+    paths: AccountPaths,
+    stats: LocalProcessStats,
+    status: Callable[[str], None],
+) -> None:
+    """Delete extras or leave them for Review duplicates, with a clear status line."""
+    from smd.duplicates import auto_delete_duplicate_extras
+
+    kind_label = (
+        "identical-file duplicate"
+        if kind == "byte"
+        else "look-alike duplicate (same picture/video, different file)"
+    )
+    if not report.duplicate_groups:
+        status(
+            f"Duplicate check done: no duplicates found "
+            f"({report.merged_scanned:,} checked)."
+        )
+        return
+    if auto_delete:
+        deleted, _ = auto_delete_duplicate_extras(
+            paths, report, require_raw=keep_raw
+        )
+        if kind == "byte":
+            stats.post_byte_files_deleted = deleted
+        else:
+            stats.post_visual_files_deleted = deleted
+        status(
+            f"Duplicate check: {report.duplicate_groups} {kind_label} group(s) — "
+            f"auto-removed {deleted} file(s), kept the oldest name in each group "
+            f"({report.merged_scanned:,} checked)."
+        )
+        return
+    stats.duplicate_groups_left_for_review += int(report.duplicate_groups)
+    status(
+        f"Duplicate check: {report.duplicate_groups} {kind_label} group(s) left "
+        f"for your review — use Technical view → Review duplicates "
+        f"({report.merged_scanned:,} checked)."
+    )
 
 
 def process_bundled_export(
@@ -1045,6 +1376,7 @@ def process_bundled_export(
     ffmpeg_threads: int = 1,
     zip_paths: list[Path] | None = None,
     layout: AccountPaths | None = None,
+    auto_delete_duplicates: bool = True,
 ) -> LocalProcessStats:
     """
     Full bundled export pipeline.
@@ -1056,6 +1388,16 @@ def process_bundled_export(
     def status(msg: str):
         if status_callback:
             status_callback(msg)
+
+    def stage(n: int, title: str) -> None:
+        """Announce a user-facing run stage (parsed by LocalExportWorker)."""
+        status(f"{SMD_STAGE_MARKER}|{n}|{SMD_RUN_STAGE_TOTAL}|{title}")
+
+    def progress(current: int, total: int) -> None:
+        """Per-stage countable progress for the GUI 0-100% bar."""
+        total = max(1, int(total))
+        current = max(0, min(int(current), total))
+        status(f"{SMD_PROGRESS_MARKER}|{current}|{total}")
 
     account_dir = normalize_account_dir(account_dir)
     paths = layout or resolve_account_paths(account_dir, migrate=True)
@@ -1071,39 +1413,262 @@ def process_bundled_export(
     if not zip_paths:
         raise FileNotFoundError("No export ZIP files found.")
 
+    stage(1, "Preparing export and metadata")
+    progress(0, 4)
     paths.ensure_dirs()
     for d in (merged_dir, raw_dir, quarantine_dir, reports_dir):
         d.mkdir(parents=True, exist_ok=True)
+    progress(1, 4)
 
     if json_path is None:
         json_path = paths.json_path
     if not json_path.exists():
         extract_json_from_zips(zip_paths, json_path)
+    progress(2, 4)
 
     memories = load_memories(json_path)
     status(f"Loaded {len(memories)} JSON rows.")
+    progress(3, 4)
 
     done_stems: set[str] = set()
     skipped_stems: set[str] = set()
+    output_by_stem: dict[str, str] = {}
     ck_version = 0
     if checkpoint_path:
-        done_stems, skipped_stems, ck_version = _load_checkpoint(checkpoint_path)
+        done_stems, skipped_stems, ck_version, output_by_stem = _load_checkpoint(
+            checkpoint_path
+        )
         if done_stems or skipped_stems:
             status(f"Resuming: {len(done_stems)} done, {len(skipped_stems)} skipped.")
         if ck_version < CHECKPOINT_VERSION and done_stems:
             status("Applying the latest quality and naming settings to your library.")
+    progress(4, 4)
 
-    items, stats = _get_staging_items(
+    def _stop() -> bool:
+        return bool(should_stop and should_stop())
+
+    # Fast path: finished library + ZIP stems fully accounted → skip extract/encode.
+    already_done, zip_main_stems = library_already_complete(
         zip_paths,
-        staging_dir,
-        status,
-        legacy_staging_dir=paths.downloads_dir / LEGACY_STAGING,
+        done_stems=done_stems,
+        skipped_stems=skipped_stems,
+        output_by_stem=output_by_stem,
+        reports_dir=reports_dir,
+        merged_dir=merged_dir,
+        raw_dir=raw_dir,
+        keep_raw=keep_raw,
     )
+    if already_done and ck_version >= CHECKPOINT_VERSION:
+        status(
+            f"Library already complete ({len(done_stems):,} memories on disk) — "
+            f"skipping ZIP extract and re-encoding."
+        )
+        stats = LocalProcessStats(
+            zips_processed=len(zip_paths),
+            json_row_count=len(memories),
+            staging_mains_before_dedupe=len(zip_main_stems),
+            skipped_already_complete=True,
+            auto_delete_duplicates=bool(auto_delete_duplicates),
+        )
+        from smd.duplicates import load_staging_removed_stems
+
+        removed = load_staging_removed_stems(reports_dir)
+        stats.duplicates_skipped = len(removed)
+        stats.staging_byte_dupes_removed = len(removed)
+        _finalize_library_counts(
+            stats,
+            done_stems=done_stems,
+            this_run_processed=0,
+            merged_dir=merged_dir,
+        )
+        if _stop():
+            stats.stopped_by_user = True
+            status("Stopped by user.")
+            return stats
+        stage(5, "Checking for duplicates")
+        progress(0, 1)
+        try:
+            from smd.duplicates import (
+                DuplicateScanCancelled,
+                scan_content_duplicates,
+                scan_visual_duplicates,
+            )
+
+            dup_report = scan_content_duplicates(
+                paths,
+                move_to_folder=False,
+                status_callback=status,
+                hash_workers=max(2, min(16, max_workers)),
+                should_stop=should_stop,
+            )
+            _apply_duplicate_scan_result(
+                dup_report,
+                kind="byte",
+                auto_delete=auto_delete_duplicates,
+                keep_raw=keep_raw,
+                paths=paths,
+                stats=stats,
+                status=status,
+            )
+            if _stop():
+                raise PipelineCancelled()
+            visual_report = scan_visual_duplicates(
+                paths,
+                status_callback=status,
+                hash_workers=max(2, min(16, max_workers)),
+                should_stop=should_stop,
+            )
+            _apply_duplicate_scan_result(
+                visual_report,
+                kind="visual",
+                auto_delete=auto_delete_duplicates,
+                keep_raw=keep_raw,
+                paths=paths,
+                stats=stats,
+                status=status,
+            )
+        except PipelineCancelled:
+            stats.stopped_by_user = True
+            status("Stopped by user.")
+            return stats
+        except DuplicateScanCancelled:
+            stats.stopped_by_user = True
+            status("Stopped by user.")
+            return stats
+        except Exception as exc:
+            status(f"Duplicate check warning: {exc}")
+            try:
+                (paths.logs_dir / "duplicate_scan_error.log").write_text(
+                    str(exc), encoding="utf-8"
+                )
+            except OSError:
+                pass
+        progress(1, 1)
+        _finalize_library_counts(
+            stats,
+            done_stems=done_stems,
+            this_run_processed=0,
+            merged_dir=merged_dir,
+        )
+        report = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "checkpoint_version": CHECKPOINT_VERSION,
+            "stats": asdict(stats),
+            "skipped_already_complete": True,
+            "total_entries": 0,
+        }
+        (reports_dir / "processing_report.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8"
+        )
+        status("Main processing finished - handing off for last touches.")
+        return stats
+
+    stage(2, "Extracting ZIP files")
+    progress(0, max(1, len(zip_paths)))
+    try:
+        items, stats = _get_staging_items(
+            zip_paths,
+            staging_dir,
+            status,
+            legacy_staging_dir=paths.downloads_dir / LEGACY_STAGING,
+            should_stop=should_stop,
+        )
+    except PipelineCancelled:
+        stats = LocalProcessStats(
+            json_row_count=len(memories),
+            stopped_by_user=True,
+            staging_mains_before_dedupe=len(zip_main_stems),
+        )
+        _finalize_library_counts(
+            stats, done_stems=done_stems, this_run_processed=0, merged_dir=merged_dir
+        )
+        status("Stopped by user.")
+        return stats
+    # Resume path skips per-ZIP extract messages - fill the stage bar.
+    progress(max(1, len(zip_paths)), max(1, len(zip_paths)))
+    stats.json_row_count = len(memories)
+    stats.staging_mains_before_dedupe = len(items)
+    stats.auto_delete_duplicates = bool(auto_delete_duplicates)
+    if _stop():
+        stats.stopped_by_user = True
+        _finalize_library_counts(
+            stats, done_stems=done_stems, this_run_processed=0, merged_dir=merged_dir
+        )
+        status("Stopped by user.")
+        return stats
+
+    # Drop byte-identical / same-content staging copies *before* match+encode so
+    # we never spend GPU time on Snapchat re-exports or collision twins. Keeper
+    # = oldest stem/filename; each JSON row is independent (UID/stem) so removing
+    # one duplicate never rewrites another file's GPS/date. Skipped when the user
+    # chose "Keep duplicates for review" (Technical view).
+    if auto_delete_duplicates:
+        try:
+            from smd.duplicates import DuplicateScanCancelled, dedupe_staging_items
+
+            items, byte_groups, byte_dropped = dedupe_staging_items(
+                items,
+                reports_dir=reports_dir,
+                mode="byte",
+                status_callback=status,
+                hash_workers=max(2, min(16, max_workers)),
+                should_stop=should_stop,
+            )
+            stats.staging_byte_dupes_removed = byte_dropped
+            if byte_groups:
+                stats.duplicates_skipped += byte_dropped
+                status(
+                    f"Auto-removed {byte_dropped} duplicate staged copies "
+                    f"(identical files, {byte_groups} group(s)) — kept oldest name."
+                )
+            if _stop():
+                raise PipelineCancelled()
+            items, visual_groups, visual_dropped = dedupe_staging_items(
+                items,
+                reports_dir=reports_dir,
+                mode="visual",
+                status_callback=status,
+                hash_workers=max(2, min(16, max_workers)),
+                should_stop=should_stop,
+            )
+            stats.staging_visual_dupes_removed = visual_dropped
+            if visual_groups:
+                stats.duplicates_skipped += visual_dropped
+                status(
+                    f"Auto-removed {visual_dropped} duplicate staged copies "
+                    f"(look-alikes, {visual_groups} group(s)) — kept oldest name."
+                )
+        except (PipelineCancelled, DuplicateScanCancelled):
+            stats.stopped_by_user = True
+            _finalize_library_counts(
+                stats, done_stems=done_stems, this_run_processed=0, merged_dir=merged_dir
+            )
+            status("Stopped by user.")
+            return stats
+        except Exception as exc:
+            status(f"Staging duplicate cleanup skipped: {exc}")
+    else:
+        status(
+            "Keeping duplicates for your review — skipped early auto-remove "
+            "(use Review duplicates after the run)."
+        )
+
+    if _stop():
+        stats.stopped_by_user = True
+        _finalize_library_counts(
+            stats, done_stems=done_stems, this_run_processed=0, merged_dir=merged_dir
+        )
+        status("Stopped by user.")
+        return stats
+
+    stage(3, "Matching dates and GPS")
+    progress(0, 5)
     match_map = build_match_map(
         items, memories, probe_workers=min(16, max(1, int(max_workers or 8)))
     )
     matched_count = sum(1 for v in match_map.values() if v is not None)
     status(f"Matched {matched_count}/{len(match_map)} files to JSON metadata.")
+    progress(1, 5)
 
     output_names, collision_report = build_unique_output_names(items, match_map)
     if collision_report:
@@ -1124,26 +1689,41 @@ def process_bundled_export(
             ),
             encoding="utf-8",
         )
+    progress(2, 5)
 
     allowed_outputs = build_allowed_output_filenames(items, output_names)
+    # Never prune filenames the checkpoint still claims as done outputs.
+    allowed_outputs |= {n for n in output_by_stem.values() if n}
     if done_stems:
         done_stems, skipped_stems, missing_outputs = reconcile_checkpoint_with_disk(
-            done_stems, skipped_stems, items, output_names, merged_dir,
-            raw_dir, keep_raw=keep_raw,
+            done_stems,
+            skipped_stems,
+            items,
+            output_names,
+            merged_dir,
+            raw_dir,
+            keep_raw=keep_raw,
+            output_by_stem=output_by_stem,
         )
+        # Refresh allowed set after possible renames in reconcile.
+        allowed_outputs |= {n for n in output_by_stem.values() if n}
         if missing_outputs:
             status(
                 f"Repairing {len(missing_outputs)} items that were marked finished "
                 f"but had no output file on disk."
             )
             if checkpoint_path:
-                _save_checkpoint(checkpoint_path, done_stems, skipped_stems)
+                _save_checkpoint(
+                    checkpoint_path, done_stems, skipped_stems, output_by_stem
+                )
+    progress(3, 5)
 
     pruned, pruned_bytes = prune_stale_outputs(merged_dir, raw_dir, allowed_outputs)
     if pruned:
         status(
             f"Removed {pruned} outdated output files ({pruned_bytes / (1024 * 1024):.1f} MB)."
         )
+    progress(4, 5)
 
     if checkpoint_path and ck_version < CHECKPOINT_VERSION:
         collide = collision_stems_from_report(collision_report)
@@ -1159,9 +1739,20 @@ def process_bundled_export(
             status(
                 "Refreshing any files that need unique filenames after a naming collision."
             )
+    progress(5, 5)
+
+    if _stop():
+        stats.stopped_by_user = True
+        _finalize_library_counts(
+            stats, done_stems=done_stems, this_run_processed=0, merged_dir=merged_dir
+        )
+        status("Stopped by user.")
+        return stats
 
     report_entries: list[dict] = []
 
+    stage(4, "Saving photos and videos")
+    progress(0, max(1, len(items)))
     total = len(items)
     max_workers = max(1, int(max_workers))
     max_ffmpeg = max(1, int(max_ffmpeg))
@@ -1192,13 +1783,16 @@ def process_bundled_export(
             item, planned, merged_dir, raw_dir, keep_raw=keep_raw
         ):
             done_stems.add(stem)
+            output_by_stem[stem] = planned
             skipped_existing += 1
             continue
         work_queue.append((stem, item))
     if skipped_existing:
         status(f"Skipping {skipped_existing} items - outputs already on disk.")
         if checkpoint_path:
-            _save_checkpoint(checkpoint_path, done_stems, skipped_stems)
+            _save_checkpoint(
+                checkpoint_path, done_stems, skipped_stems, output_by_stem
+            )
 
     processed_count = 0
     since_checkpoint = 0
@@ -1251,12 +1845,16 @@ def process_bundled_export(
         with state_lock:
             if out.repair_note:
                 status(out.repair_note)
-            _apply_item_outcome(out, stats, done_stems, skipped_stems, report_entries)
+            _apply_item_outcome(
+                out, stats, done_stems, skipped_stems, report_entries, output_by_stem
+            )
             if out.done or out.skipped:
                 processed_count += 1
                 since_checkpoint += 1
             if checkpoint_path and since_checkpoint >= 25:
-                _save_checkpoint(checkpoint_path, done_stems, skipped_stems)
+                _save_checkpoint(
+                    checkpoint_path, done_stems, skipped_stems, output_by_stem
+                )
                 since_checkpoint = 0
             limit_hit = limit > 0 and processed_count >= limit
         report_progress()
@@ -1313,30 +1911,92 @@ def process_bundled_export(
 
     report_progress(force=True)
     if checkpoint_path:
-        _save_checkpoint(checkpoint_path, done_stems, skipped_stems)
+        _save_checkpoint(checkpoint_path, done_stems, skipped_stems, output_by_stem)
 
+    if _stop():
+        stats.stopped_by_user = True
+        _finalize_library_counts(
+            stats,
+            done_stems=done_stems,
+            this_run_processed=processed_count,
+            merged_dir=merged_dir,
+        )
+        status("Stopped by user.")
+        return stats
+
+    stage(5, "Checking for duplicates")
+    # Byte + visual scans emit their own (current/total) status lines; those
+    # drive the per-stage 0-100% bar. Bookend at 100% in case a scan finds
+    # nothing new to check and never emits a countable line. Extras are
+    # auto-deleted (keep oldest filename) - no Review step required.
+    progress(0, 1)
     try:
-        from smd.duplicates import scan_content_duplicates
+        from smd.duplicates import (
+            DuplicateScanCancelled,
+            scan_content_duplicates,
+            scan_visual_duplicates,
+        )
 
         dup_report = scan_content_duplicates(
             paths,
             move_to_folder=False,
             status_callback=status,
             hash_workers=max(2, min(16, max_workers)),
+            should_stop=should_stop,
         )
-        if dup_report.duplicate_groups:
-            status(
-                f"Duplicate check done: {dup_report.duplicate_groups} identical-file group(s) found "
-                f"({dup_report.merged_scanned:,} files checked). "
-                "Use Review duplicates on the Save memories tab to pick which copy to keep."
+        _apply_duplicate_scan_result(
+            dup_report,
+            kind="byte",
+            auto_delete=auto_delete_duplicates,
+            keep_raw=keep_raw,
+            paths=paths,
+            stats=stats,
+            status=status,
+        )
+        if _stop():
+            raise PipelineCancelled()
+        visual_report = scan_visual_duplicates(
+            paths,
+            status_callback=status,
+            hash_workers=max(2, min(16, max_workers)),
+            should_stop=should_stop,
+        )
+        _apply_duplicate_scan_result(
+            visual_report,
+            kind="visual",
+            auto_delete=auto_delete_duplicates,
+            keep_raw=keep_raw,
+            paths=paths,
+            stats=stats,
+            status=status,
+        )
+    except (PipelineCancelled, DuplicateScanCancelled):
+        stats.stopped_by_user = True
+        _finalize_library_counts(
+            stats,
+            done_stems=done_stems,
+            this_run_processed=processed_count,
+            merged_dir=merged_dir,
+        )
+        status("Stopped by user.")
+        return stats
+    except Exception as exc:
+        status(f"Duplicate check warning: {exc}")
+        try:
+            paths.logs_dir.mkdir(parents=True, exist_ok=True)
+            (paths.logs_dir / "duplicate_scan_error.log").write_text(
+                str(exc), encoding="utf-8"
             )
-        else:
-            status(
-                f"Duplicate check done: no identical files found "
-                f"({dup_report.merged_scanned:,} checked)."
-            )
-    except Exception:
-        pass
+        except OSError:
+            pass
+    progress(1, 1)
+
+    _finalize_library_counts(
+        stats,
+        done_stems=done_stems,
+        this_run_processed=processed_count,
+        merged_dir=merged_dir,
+    )
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1350,5 +2010,6 @@ def process_bundled_export(
     (reports_dir / "processing_report.json").write_text(
         json.dumps(report, indent=2), encoding="utf-8"
     )
-    status("Processing complete.")
+    # Do not say "done" here - the GUI still runs verify/summary (stage 6).
+    status("Main processing finished - handing off for last touches.")
     return stats
