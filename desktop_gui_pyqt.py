@@ -498,7 +498,10 @@ if __name__ == '__main__':
         painter.end()
         return pixmap
 
-    splash = QSplashScreen(_build_splash_pixmap())
+    splash = QSplashScreen(
+        _build_splash_pixmap(),
+        Qt.WindowStaysOnTopHint,
+    )
     splash.show()
     QCoreApplication.processEvents()
     splash.showMessage(
@@ -507,7 +510,7 @@ if __name__ == '__main__':
         QColor(161, 161, 166),
     )
     QCoreApplication.processEvents()
-    
+
     print("DEBUG: Creating main window...")
     sys.stdout.flush()
     try:
@@ -534,8 +537,8 @@ if __name__ == '__main__':
         sys.exit(1)
     print(f"DEBUG: Window created, showing at position ({gui.x()}, {gui.y()})")
 
-    # Center BEFORE the first show so the user never sees a blank window at
-    # (100,100) jump to mid-screen (looks like a second "flash" window).
+    # Professional reveal: keep splash up; lay out the main window invisible;
+    # only then drop splash and fade opacity to 1 so users never see a blank shell.
     try:
         screen = QApplication.desktop().availableGeometry(gui)
         gui.setGeometry(
@@ -547,10 +550,23 @@ if __name__ == '__main__':
     except Exception:
         pass
 
-    splash.finish(gui)
+    splash.showMessage(
+        'Opening…',
+        Qt.AlignBottom | Qt.AlignHCenter,
+        QColor(161, 161, 166),
+    )
     QCoreApplication.processEvents()
+
+    gui.setWindowOpacity(0.0)
     gui.showNormal()
     gui.show()
+    QCoreApplication.processEvents()
+    QCoreApplication.processEvents()
+
+    splash.close()
+    QCoreApplication.processEvents()
+
+    gui.setWindowOpacity(1.0)
     gui.raise_()
     gui.activateWindow()
     QCoreApplication.processEvents()

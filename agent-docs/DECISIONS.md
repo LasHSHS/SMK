@@ -140,13 +140,13 @@ processing** creates/activates the folder. Button label shortened from
 **Why**: Create was a redundant step that also cleared the name field;
 Start already created the folder.
 
-### 2026-08-02 - Center main window before first show
+### 2026-08-02 - Splash until UI ready (no blank window flash)
 
-**What**: `main()` sets centered geometry before `gui.show()`, then
-`processEvents`. Installer script renamed to `smk_installer.iss` (Inno kept).
+**What**: Startup keeps the splash on top, centers the main window, shows it at
+`opacity=0` so Qt can finish layout/paint, closes splash, then sets opacity to 1.
 
-**Why**: Frame-step recording showed a blank white SMK chrome at (100,100)
-then jump to center — looked like a second flashing window / “CMD”.
+**Why**: Users already see “Loading application…”. Showing an empty white
+main window (or corner→center jump) looked unprofessional. Reveal only when ready.
 `SMKTester.bat` still uses `python.exe` on purpose (console owns the process).
 
 ### 2026-08-02 - macOS/Linux beta packaging only (untested)
