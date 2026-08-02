@@ -45,6 +45,14 @@ This script:
 - **Link-only exports (legacy JSON with URLs):** not supported - request a new export with media in the ZIP
 - **My Eyes Only** not included in Memories export
 
+## Platforms
+
+- **Official:** Windows (`build_smk.ps1` → installer + portable ZIP on GitHub Releases).
+- **Beta / untested:** macOS and Linux via `build_smk_unix.sh` or workflow
+  `.github/workflows/beta-unix.yml`. Label every artifact clearly
+  (`BETA-UNTESTED`). Do **not** call these official releases.
+- **Not planned:** iOS / Android (desktop app only).
+
 ## Trust / SmartScreen (GitHub only)
 
 **Decision (2026-08):** distribute via **GitHub Releases only**. No Microsoft Store,

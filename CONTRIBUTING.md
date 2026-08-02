@@ -4,10 +4,15 @@ Thanks for wanting to help. SMK is maintained as a **Windows-first** app, and we
 
 ## High-value areas
 
-1. **macOS / Linux compatibility** — packaging, installers, CI, and real-device testing. Official v1 ships Windows only; ports are very welcome.
+1. **macOS / Linux** — official support is Windows only. Experimental scripts:
+   `build_smk_unix.sh`, `scripts/fetch_ffmpeg.sh`, and the
+   `Beta unix builds (untested)` GitHub Action. Maintainer has **not**
+   verified these. Real-device testing and packaging fixes are the highest-value help.
 2. **Bugs and reliability** — crashes, edge-case exports, matching/metadata mistakes.
 3. **Performance** — faster processing, smoother UI, less disk thrash.
 4. **Docs / UX** — clearer wording, accessibility, beginner-friendly flows.
+
+**Not in scope soon:** iOS / iPadOS / Android native apps (desktop PyQt only).
 
 ## Before a large port
 

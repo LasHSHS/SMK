@@ -1,10 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-SMK all-in-one Windows build (portable folder).
+SMK all-in-one build (portable folder).
 
+Official: Windows. macOS/Linux builds from this spec are BETA / untested.
 Includes: Python runtime, PyQt5 + WebEngine, ffmpeg, folium assets.
-End users run dist/smd/SMK.exe — no Python, pip, or separate tool installs.
 """
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -100,7 +101,12 @@ a = Analysis(
 pyz = PYZ(a.pure)
 
 _version_file = Path('file_version_info.txt')
-version_arg = str(_version_file) if _version_file.is_file() else None
+# PE version resource is Windows-only.
+version_arg = (
+    str(_version_file)
+    if _version_file.is_file() and sys.platform.startswith('win')
+    else None
+)
 
 exe = EXE(
     pyz,

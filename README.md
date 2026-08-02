@@ -25,18 +25,35 @@ Process Snapchat Memories exports locally on your PC: extract bundled media, mer
 
 ## Platform Support
 
-- Official target for v1: **Windows 10/11 (64-bit)** — this is the only platform built, tested, and supported by the maintainer.
-- The Python/PyQt5 source is cross-platform in principle, but there is no macOS or Linux build yet (and none is planned by the maintainer alone — no hardware to build or test on).
+| Platform | Status |
+|----------|--------|
+| **Windows 10/11 (64-bit)** | **Official** — built, tested, and supported |
+| **macOS** | **Beta / untested** — experimental packaging only |
+| **Linux** | **Beta / untested** — experimental packaging only |
+| iOS / Android | Not planned (this is a desktop PyQt app, not an iPhone/iPad app) |
+
+macOS and Linux betas are **not confirmed** by the maintainer. There is no reliable maintainer test coverage on those systems yet (maybe months from now). Expect breakage. Prefer Windows for real use.
+
+### Beta builds (macOS / Linux)
+
+From source on the target OS:
+
+```bash
+chmod +x build_smk_unix.sh scripts/fetch_ffmpeg.sh
+./build_smk_unix.sh
+```
+
+Or run the GitHub Action **“Beta unix builds (untested)”** (`workflow_dispatch`) and download the artifacts. Every beta folder includes `BETA_UNTESTED_README.txt`.
 
 ## Contributing
 
 **Contributors are very welcome.** This project is open to help with:
 
-- **macOS and Linux** ports (packaging, installers, testing)
-- Bug fixes, performance, and code quality
+- Making **macOS and Linux** betas actually reliable (packaging, testing, bug reports)
+- Bug fixes, performance, and code quality on Windows
 - Docs and UX polish
 
-Please open an issue first for large ports (packaging/signing approach). Smaller fixes and improvements can go straight to a PR. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Please open an issue first for large ports. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Quick Start (User)
 
@@ -63,6 +80,8 @@ powershell -ExecutionPolicy Bypass -File .\build_smk.ps1
 ```
 
 Output: `dist/smd/SMK.exe` (all-in-one portable folder; package dir name stays `smd`).
+
+macOS/Linux experimental: `./build_smk_unix.sh` (see Platform Support — beta / untested).
 
 ## Architecture
 

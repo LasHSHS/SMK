@@ -140,13 +140,26 @@ processing** creates/activates the folder. Button label shortened from
 **Why**: Create was a redundant step that also cleared the name field;
 Start already created the folder.
 
+### 2026-08-02 - macOS/Linux beta packaging only (untested)
+
+**What**: Added `build_smk_unix.sh`, `scripts/fetch_ffmpeg.sh`, and
+`.github/workflows/beta-unix.yml`. Cross-platform ffmpeg name resolution
+(no `.exe` required). README marks macOS/Linux as beta / untested.
+Not iOS — desktop only.
+
+**Why**: Contributors asked for non-Windows paths; maintainer will not
+claim confidence without months of real Mac/Linux soak testing. Official
+product stays Windows.
+
 ### 2026-08-02 - Hide ffmpeg/ffprobe consoles on startup
 
 **What**: `verify_tool` / About version probes use `CREATE_NO_WINDOW` via
 `smd.procutil.subprocess_flags` (same as merge/metadata paths).
+`verify_tool` / `bundled_status` are process-cached (`lru_cache`) so About +
+startup self-check do not re-spawn the tools.
 
-**Why**: Startup `bundled_status()` ran bare `ffmpeg`/`ffprobe -version`,
-which flashed black CMD windows for a few ms each open.
+**Why**: Startup ran bare `ffmpeg`/`ffprobe -version` (console flashes). Logs
+also showed many duplicate probes per launch before caching.
 
 ### 2026-08-01 - GitHub only; no Store / no paid signing
 
