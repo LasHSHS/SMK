@@ -43,11 +43,16 @@ def ffprobe_available() -> bool:
 def verify_tool(exe_path: str | None, version_args: tuple[str, ...] = ("-version",)) -> bool:
     if not exe_path:
         return False
+    from smd.procutil import subprocess_flags
+
+    startupinfo, creationflags = subprocess_flags()
     try:
         r = subprocess.run(
             [exe_path, *version_args],
             capture_output=True,
             timeout=8,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
         )
         return r.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):

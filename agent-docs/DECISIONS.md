@@ -140,6 +140,14 @@ processing** creates/activates the folder. Button label shortened from
 **Why**: Create was a redundant step that also cleared the name field;
 Start already created the folder.
 
+### 2026-08-02 - Hide ffmpeg/ffprobe consoles on startup
+
+**What**: `verify_tool` / About version probes use `CREATE_NO_WINDOW` via
+`smd.procutil.subprocess_flags` (same as merge/metadata paths).
+
+**Why**: Startup `bundled_status()` ran bare `ffmpeg`/`ffprobe -version`,
+which flashed black CMD windows for a few ms each open.
+
 ### 2026-08-01 - GitHub only; no Store / no paid signing
 
 **What**: Official Windows builds ship from **GitHub Releases** only. No

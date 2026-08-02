@@ -54,19 +54,17 @@ def _info_table(rows: list[tuple[str, str]]) -> str:
 def _tool_version(exe_path: str | None) -> str:
     if not exe_path or not verify_tool(exe_path):
         return "-"
-    try:
-        import subprocess
+    from smd.procutil import run_tool
 
-        r = subprocess.run(
-            [exe_path, "-version"],
-            capture_output=True,
-            text=True,
-            timeout=6,
-        )
-        if r.stdout:
-            return r.stdout.splitlines()[0].strip()
-    except Exception:
-        pass
+    r = run_tool([exe_path, "-version"], timeout=6)
+    if r is not None and r.stdout:
+        try:
+            text = r.stdout.decode("utf-8", errors="replace")
+        except Exception:
+            text = str(r.stdout)
+        line = text.splitlines()[0].strip() if text else ""
+        if line:
+            return line
     return "-"
 
 
