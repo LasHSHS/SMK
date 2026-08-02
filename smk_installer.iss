@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=Snapchat Memories Keeper
-AppVersion=1.0.0
+AppVersion=1.0.1
 AppPublisher=Las HS
 AppPublisherURL=https://github.com/LasHSHS
 DefaultDirName={autopf}\Snapchat Memories Keeper
