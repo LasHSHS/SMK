@@ -140,6 +140,15 @@ processing** creates/activates the folder. Button label shortened from
 **Why**: Create was a redundant step that also cleared the name field;
 Start already created the folder.
 
+### 2026-08-02 - Isolate macOS/Linux betas in separate repos
+
+**What**: Official Windows stays in `LasHSHS/SMK`. Contributor starting
+points are `LasHSHS/SMK-macos` and `LasHSHS/SMK-linux` (copied trees,
+`0.1.0-beta`, untested). Unix packaging removed from the Windows repo.
+
+**Why**: Platform experiments must not break Windows. Maintainer will not
+claim Mac/Linux confidence for months; betas are explicitly unverified.
+
 ### 2026-08-02 - Splash until UI ready (no blank window flash)
 
 **What**: Startup keeps the splash on top, centers the main window, shows it at
