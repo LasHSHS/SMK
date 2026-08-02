@@ -47,10 +47,10 @@ This script:
 
 ## Platforms
 
-- **Official:** Windows (`build_smk.ps1` → installer + portable ZIP on GitHub Releases).
-- **Beta / untested:** macOS and Linux via `build_smk_unix.sh` or workflow
-  `.github/workflows/beta-unix.yml`. Label every artifact clearly
-  (`BETA-UNTESTED`). Do **not** call these official releases.
+- **Official:** Windows only (this repo — `build_smk.ps1` → GitHub Releases).
+- **Beta / untested (isolated repos):**  
+  https://github.com/LasHSHS/SMK-macos · https://github.com/LasHSHS/SMK-linux  
+  Maintainer has not verified those builds. Do not merge unix experiments into Windows.
 - **Not planned:** iOS / Android (desktop app only).
 
 ## Trust / SmartScreen (GitHub only)

@@ -25,35 +25,23 @@ Process Snapchat Memories exports locally on your PC: extract bundled media, mer
 
 ## Platform Support
 
-| Platform | Status |
-|----------|--------|
-| **Windows 10/11 (64-bit)** | **Official** — built, tested, and supported |
-| **macOS** | **Beta / untested** — experimental packaging only |
-| **Linux** | **Beta / untested** — experimental packaging only |
-| iOS / Android | Not planned (this is a desktop PyQt app, not an iPhone/iPad app) |
+| Platform | Status | Repository |
+|----------|--------|------------|
+| **Windows 10/11 (64-bit)** | **Official** — built, tested, supported | **This repo** |
+| **macOS** | **Beta / untested** — separate project | [LasHSHS/SMK-macos](https://github.com/LasHSHS/SMK-macos) |
+| **Linux** | **Beta / untested** — separate project | [LasHSHS/SMK-linux](https://github.com/LasHSHS/SMK-linux) |
+| iOS / Android | Not planned | — |
 
-macOS and Linux betas are **not confirmed** by the maintainer. There is no reliable maintainer test coverage on those systems yet (maybe months from now). Expect breakage. Prefer Windows for real use.
-
-### Beta builds (macOS / Linux)
-
-From source on the target OS:
-
-```bash
-chmod +x build_smk_unix.sh scripts/fetch_ffmpeg.sh
-./build_smk_unix.sh
-```
-
-Or run the GitHub Action **“Beta unix builds (untested)”** (`workflow_dispatch`) and download the artifacts. Every beta folder includes `BETA_UNTESTED_README.txt`.
+macOS and Linux live in **isolated repos** so experiments there cannot break Windows. Those builds are **not tested or confirmed** by the maintainer — only a starting point for contributors. Prefer this Windows release for real use.
 
 ## Contributing
 
-**Contributors are very welcome.** This project is open to help with:
+**Contributors are very welcome.**
 
-- Making **macOS and Linux** betas actually reliable (packaging, testing, bug reports)
-- Bug fixes, performance, and code quality on Windows
-- Docs and UX polish
+- **Windows (this repo):** bugs, performance, UX, docs
+- **macOS / Linux:** work in [SMK-macos](https://github.com/LasHSHS/SMK-macos) / [SMK-linux](https://github.com/LasHSHS/SMK-linux) only
 
-Please open an issue first for large ports. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Quick Start (User)
 
@@ -80,8 +68,6 @@ powershell -ExecutionPolicy Bypass -File .\build_smk.ps1
 ```
 
 Output: `dist/smd/SMK.exe` (all-in-one portable folder; package dir name stays `smd`).
-
-macOS/Linux experimental: `./build_smk_unix.sh` (see Platform Support — beta / untested).
 
 ## Architecture
 
