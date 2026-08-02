@@ -140,6 +140,15 @@ processing** creates/activates the folder. Button label shortened from
 **Why**: Create was a redundant step that also cleared the name field;
 Start already created the folder.
 
+### 2026-08-02 - Center main window before first show
+
+**What**: `main()` sets centered geometry before `gui.show()`, then
+`processEvents`. Installer script renamed to `smk_installer.iss` (Inno kept).
+
+**Why**: Frame-step recording showed a blank white SMK chrome at (100,100)
+then jump to center — looked like a second flashing window / “CMD”.
+`SMKTester.bat` still uses `python.exe` on purpose (console owns the process).
+
 ### 2026-08-02 - macOS/Linux beta packaging only (untested)
 
 **What**: Added `build_smk_unix.sh`, `scripts/fetch_ffmpeg.sh`, and

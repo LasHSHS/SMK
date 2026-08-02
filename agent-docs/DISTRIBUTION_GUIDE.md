@@ -25,7 +25,7 @@ This script:
 3. Runs `pyinstaller smd.spec`
 4. Copies ffmpeg beside `dist/smd/SMK.exe`
 
-**Output:** `dist/smd/` — zip this folder or compile `smd_installer.iss` with Inno Setup.
+**Output:** `dist/smd/` — zip this folder or compile `smk_installer.iss` with Inno Setup.
 
 ## Release checklist
 

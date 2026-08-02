@@ -55,7 +55,7 @@ This script:
 3. Runs `pyinstaller smd.spec`
 4. Copies ffmpeg into `dist\smd\tools\ffmpeg` (and `_internal` if present)
 
-**Output:** `dist\smd\SMK.exe` + folder → zip or compile `smd_installer.iss` (Inno Setup).
+**Output:** `dist\smd\SMK.exe` + folder → zip or compile `smk_installer.iss` (Inno Setup).
 
 ### Fetch ffmpeg only (dev, without full build)
 
@@ -77,7 +77,7 @@ Source: gyan.dev **ffmpeg-release-essentials** (Windows). Binaries are gitignore
 | `build_smd.ps1` | Release build entry point |
 | `scripts/fetch_ffmpeg.ps1` | Download Windows ffmpeg essentials |
 | `tools/ffmpeg/` | Bundled binaries (not in git) |
-| `smd_installer.iss` | Windows installer |
+| `smk_installer.iss` | Windows installer (Inno Setup) |
 | `DISTRIBUTION_GUIDE.md` | Release checklist |
 | `desktop_gui_pyqt.py` | Startup check: frozen build = “SMK ready”, not “install ffmpeg” |
 

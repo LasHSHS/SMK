@@ -59,4 +59,4 @@ Get-ChildItem -Path 'dist\smd' -Recurse -Filter '*.log' -File -ErrorAction Silen
     Remove-Item -Force -ErrorAction SilentlyContinue
 
 Write-Host "[SMK Build] Done. All-in-one package: .\dist\smd\SMK.exe" -ForegroundColor Green
-Write-Host "[SMK Build] Optional installer: compile smd_installer.iss with Inno Setup" -ForegroundColor Cyan
+Write-Host "[SMK Build] Optional installer: compile smk_installer.iss with Inno Setup" -ForegroundColor Cyan

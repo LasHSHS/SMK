@@ -533,22 +533,28 @@ if __name__ == '__main__':
             pass
         sys.exit(1)
     print(f"DEBUG: Window created, showing at position ({gui.x()}, {gui.y()})")
-    
-    # Hide splash screen and show main window
+
+    # Center BEFORE the first show so the user never sees a blank window at
+    # (100,100) jump to mid-screen (looks like a second "flash" window).
+    try:
+        screen = QApplication.desktop().availableGeometry(gui)
+        gui.setGeometry(
+            screen.x() + max(0, (screen.width() - gui.width()) // 2),
+            screen.y() + max(0, (screen.height() - gui.height()) // 2),
+            gui.width(),
+            gui.height(),
+        )
+    except Exception:
+        pass
+
     splash.finish(gui)
+    QCoreApplication.processEvents()
     gui.showNormal()
     gui.show()
     gui.raise_()
     gui.activateWindow()
+    QCoreApplication.processEvents()
     startup_log("DEBUG: main window shown")
-    try:
-        screen = QApplication.desktop().availableGeometry(gui)
-        gui.move(
-            screen.x() + max(0, (screen.width() - gui.width()) // 2),
-            screen.y() + max(0, (screen.height() - gui.height()) // 2),
-        )
-    except Exception:
-        pass
     print(f"DEBUG: Window shown, visible={gui.isVisible()}, minimized={gui.isMinimized()}")
     sys.stdout.flush()
     sys.exit(app.exec_())
