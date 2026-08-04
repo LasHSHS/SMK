@@ -11,6 +11,20 @@ relevant file/function instead of pasting code.
 
 ---
 
+### 2026-08-04 - Raw-first phases; never re-encode when only raw is missing
+
+**What**: With "Also save without filters" on, `process_bundled_export` runs
+a raw copy phase first, then a merged/overlay phase (`only="raw"` /
+`only="merged"` in `_process_single_item`). If merged already exists and only
+raw is missing (e.g. user toggled raw on after a finished library), SMK copies
+raw only and does **not** re-burn overlays. Status text says so via
+`_missing_outputs_message`.
+
+**Why**: Las v1.0.1 re-ran ~13k items (~4h of ffmpeg) after enabling raw,
+because reconcile treated missing raw as "no output" and full reprocess
+re-encoded overlays. Fresh raw-on runs also match the user’s mental model:
+originals first, filters second. Raw-off stays a single merged pass.
+
 ### 2026-08-01 - Doc title underlines via document image resource
 
 **What**: `headed_title` uses a 2-row table (title, then 2px
