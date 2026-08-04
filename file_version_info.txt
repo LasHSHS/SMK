@@ -2,8 +2,8 @@
 # Windows file properties for SMK.exe (keep in sync with smd/version.py).
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 2, 0),
-    prodvers=(1, 0, 2, 0),
+    filevers=(1, 0, 3, 0),
+    prodvers=(1, 0, 3, 0),
     mask=0x3F,
     flags=0x0,
     OS=0x40004,
@@ -19,12 +19,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'Las HS'),
             StringStruct(u'FileDescription', u'Snapchat Memories Keeper'),
-            StringStruct(u'FileVersion', u'1.0.2'),
+            StringStruct(u'FileVersion', u'1.0.3'),
             StringStruct(u'InternalName', u'SMK'),
             StringStruct(u'LegalCopyright', u'Copyright (c) Las HS'),
             StringStruct(u'OriginalFilename', u'SMK.exe'),
             StringStruct(u'ProductName', u'Snapchat Memories Keeper'),
-            StringStruct(u'ProductVersion', u'1.0.2'),
+            StringStruct(u'ProductVersion', u'1.0.3'),
           ]
         )
       ]
